@@ -103,12 +103,11 @@ def parse_claude_sessions() -> list:
     return list(buckets.values())
 
 
-# ── git push ──────────────────────────────────────────────────────────────────
-def git_push(new_count: int, updated_count: int):
+# ── git commit + push（不含 pull）────────────────────────────────────────────
+def git_commit_push(new_count: int, updated_count: int):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     msg = f"sync: +{new_count} new, ~{updated_count} updated ({now})"
     cmds = [
-        ["git", "pull", "--rebase"],
         ["git", "add", "data/usage.ndjson"],
         ["git", "commit", "-m", msg],
         ["git", "push"],
@@ -159,8 +158,25 @@ def main():
         print("  数据无变化，跳过推送。")
         return
 
+    # 先 pull，再写文件推送，避免 unstaged changes 冲突
+    print("  同步远程...")
+    pull = subprocess.run(["git", "pull", "--rebase"], cwd=REPO_DIR, capture_output=True, text=True)
+    if pull.returncode != 0:
+        print(f"  pull 失败: {pull.stderr.strip()}")
+        sys.exit(1)
+
+    # 重新写文件（pull 可能带来新记录，重新 load 合并）
+    existing2 = load_existing()
+    for rec in existing.values():
+        key = (rec["source"], rec["model"], rec["hour_start"])
+        existing2[key] = rec
+    sorted_records = sorted(existing2.values(), key=lambda r: (r["hour_start"], r["source"], r["model"]))
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        for rec in sorted_records:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
     print("  推送到 GitHub...")
-    if git_push(new_count, updated_count):
+    if git_commit_push(new_count, updated_count):
         print("  推送成功！")
     else:
         print("  推送失败，请检查 git 配置。")
