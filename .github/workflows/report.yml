@@ -3,7 +3,7 @@ name: Update Report
 on:
   push:
     paths:
-      - "data/requests.ndjson"
+      - "data/usage.ndjson"
   schedule:
     # 每月1日 UTC 00:00 自动刷新（即使没有新数据也更新时间戳）
     - cron: "0 0 1 * *"
