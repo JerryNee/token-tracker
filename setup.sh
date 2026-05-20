@@ -8,11 +8,24 @@ GH="$HOME/bin/gh"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_NAME="token-tracker"
 PYTHON=$(which python3)
+TT_BIN="$HOME/npm-global/bin/tokentracker-cli"
 
 echo "========================================"
 echo "  Token Tracker — 初始化脚本"
 echo "========================================"
 echo ""
+
+# ── 0. 安装 TokenTracker（用于本地仪表板 + 多工具数据收集）──
+echo "▶ 步骤 0/5：安装 TokenTracker"
+if [ -f "$TT_BIN" ]; then
+    echo "  已安装，跳过"
+else
+    mkdir -p "$HOME/npm-global" "$HOME/npm-cache"
+    npm config set prefix "$HOME/npm-global"
+    npm config set cache "$HOME/npm-cache"
+    npm install -g tokentracker-cli 2>&1 | grep -v "^npm warn\|^npm notice" | tail -3
+    echo "  TokenTracker 安装完成"
+fi
 
 # ── 1. 检查 gh ──
 if [ ! -f "$GH" ]; then
@@ -99,7 +112,13 @@ bash "$REPO_DIR/setup_auto_sync.sh"
 echo ""
 echo "========================================"
 echo "  ✅ 全部完成！"
-echo "  GitHub 仓库：https://github.com/$GITHUB_USER/$REPO_NAME"
-echo "  每天 12:00 自动同步，也可随时手动运行："
-echo "  python3 $REPO_DIR/sync.py"
+echo ""
+echo "  本地仪表板（TokenTracker）："
+echo "    $TT_BIN init   # 首次初始化，安装 hooks"
+echo "    $TT_BIN        # 打开仪表板"
+echo ""
+echo "  GitHub 备份："
+echo "    https://github.com/$GITHUB_USER/$REPO_NAME"
+echo "    每天 12:00 自动同步，也可手动运行："
+echo "    python3 $REPO_DIR/sync.py"
 echo "========================================"

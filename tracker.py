@@ -127,6 +127,14 @@ def parse_claude_sessions(since: Optional[datetime] = None) -> list[UsageRecord]
                         if not usage:
                             continue
                         model = msg.get("model", "unknown")
+                        # 跳过无实际 token 的合成条目
+                        if not model or model.startswith("<") or (
+                            usage.get("input_tokens", 0) == 0
+                            and usage.get("output_tokens", 0) == 0
+                            and usage.get("cache_creation_input_tokens", 0) == 0
+                            and usage.get("cache_read_input_tokens", 0) == 0
+                        ):
+                            continue
 
                         ts_str = entry.get("timestamp")
                         if ts_str:
