@@ -226,7 +226,7 @@ def generate_readme(records: list) -> str:
 ---
 
 > 费用为估算值，基于 [Anthropic](https://www.anthropic.com/pricing) / [OpenAI](https://openai.com/api/pricing/) 官方定价。
-> 数据通过 [TokenTracker](https://github.com/mm7894215/TokenTracker) 收集，由本项目 sync.py 定期备份到 GitHub。
+> 数据来源：`~/.claude/projects/` 会话文件，由 sync.py 每日自动备份。
 """
 
 
