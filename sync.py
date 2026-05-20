@@ -126,10 +126,19 @@ def main():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 开始同步...")
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
+    # 1. 先 pull（此时还没写任何文件，不会有 unstaged changes）
+    print("  拉取远程最新...")
+    pull = subprocess.run(["git", "pull", "--rebase"], cwd=REPO_DIR, capture_output=True, text=True)
+    if pull.returncode != 0:
+        print(f"  pull 失败: {pull.stderr.strip()}")
+        sys.exit(1)
+
+    # 2. 读取备份（pull 后的最新状态）
     print("  读取已有备份...")
     existing = load_existing()
     print(f"  已有 {len(existing)} 条小时记录")
 
+    # 3. 扫描本地会话
     print("  扫描 Claude Code 会话...")
     new_records = parse_claude_sessions()
     print(f"  解析到 {len(new_records)} 条小时记录")
@@ -138,6 +147,7 @@ def main():
         print("  没有数据，退出。")
         return
 
+    # 4. 合并
     new_count = updated_count = 0
     for rec in new_records:
         key = (rec["source"], rec["model"], rec["hour_start"])
@@ -149,32 +159,13 @@ def main():
 
     print(f"  合并后共 {len(existing)} 条（新增 {new_count}，更新 {updated_count}）")
 
+    # 5. 写文件
     sorted_records = sorted(existing.values(), key=lambda r: (r["hour_start"], r["source"], r["model"]))
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         for rec in sorted_records:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
-    if new_count == 0 and updated_count == 0:
-        print("  数据无变化，跳过推送。")
-        return
-
-    # 先 pull，再写文件推送，避免 unstaged changes 冲突
-    print("  同步远程...")
-    pull = subprocess.run(["git", "pull", "--rebase"], cwd=REPO_DIR, capture_output=True, text=True)
-    if pull.returncode != 0:
-        print(f"  pull 失败: {pull.stderr.strip()}")
-        sys.exit(1)
-
-    # 重新写文件（pull 可能带来新记录，重新 load 合并）
-    existing2 = load_existing()
-    for rec in existing.values():
-        key = (rec["source"], rec["model"], rec["hour_start"])
-        existing2[key] = rec
-    sorted_records = sorted(existing2.values(), key=lambda r: (r["hour_start"], r["source"], r["model"]))
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        for rec in sorted_records:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-
+    # 6. commit + push
     print("  推送到 GitHub...")
     if git_commit_push(new_count, updated_count):
         print("  推送成功！")
