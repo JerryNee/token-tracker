@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+"""Token usage tracker for Claude Code and other AI coding tools."""
+
+import json
+import os
+import sys
+import argparse
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Optional
+
+# ── Pricing (USD per 1M tokens) ──────────────────────────────────────────────
+PRICING = {
+    # Claude Opus 4
+    "claude-opus-4-7":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
+    "claude-opus-4-5":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
+    # Claude Sonnet 4
+    "claude-sonnet-4-6": {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
+    "claude-sonnet-4-5": {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
+    # Claude Haiku 4
+    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00, "cache_write": 1.00, "cache_read": 0.08},
+    "claude-haiku-4-5": {"input": 0.80, "output": 4.00, "cache_write": 1.00, "cache_read": 0.08},
+}
+
+def get_price(model: str, kind: str) -> float:
+    """Return price per 1M tokens for a model+kind, falling back to family match."""
+    if model in PRICING:
+        return PRICING[model].get(kind, 0.0)
+    # Fuzzy family match
+    for key, prices in PRICING.items():
+        if model.startswith(key) or key.startswith(model.split("-20")[0]):
+            return prices.get(kind, 0.0)
+    # Unknown model — return 0 rather than crash
+    return 0.0
+
+
+# ── Data structures ───────────────────────────────────────────────────────────
+@dataclass
+class UsageRecord:
+    timestamp: datetime
+    project: str
+    session_id: str
+    model: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_write_tokens: int = 0
+    cache_read_tokens: int = 0
+
+    @property
+    def cost(self) -> float:
+        m = 1_000_000
+        return (
+            self.input_tokens      * get_price(self.model, "input")       / m +
+            self.output_tokens     * get_price(self.model, "output")      / m +
+            self.cache_write_tokens * get_price(self.model, "cache_write") / m +
+            self.cache_read_tokens  * get_price(self.model, "cache_read")  / m
+        )
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens + self.cache_write_tokens + self.cache_read_tokens
+
+
+@dataclass
+class AggRow:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_write_tokens: int = 0
+    cache_read_tokens: int = 0
+    cost: float = 0.0
+    requests: int = 0
+
+    def add(self, rec: UsageRecord):
+        self.input_tokens      += rec.input_tokens
+        self.output_tokens     += rec.output_tokens
+        self.cache_write_tokens += rec.cache_write_tokens
+        self.cache_read_tokens  += rec.cache_read_tokens
+        self.cost              += rec.cost
+        self.requests          += 1
+
+    @property
+    def total_tokens(self):
+        return self.input_tokens + self.output_tokens + self.cache_write_tokens + self.cache_read_tokens
+
+
+# ── Claude Code parser ────────────────────────────────────────────────────────
+CLAUDE_DIR = Path.home() / ".claude" / "projects"
+
+def project_slug_to_name(slug: str) -> str:
+    """Convert -Users-foo-bar-project to ~/bar/project."""
+    path = slug.replace("-", "/").lstrip("/")
+    home = str(Path.home()).lstrip("/")
+    if path.startswith(home):
+        path = "~" + path[len(home):]
+    # Keep only last 2 components for readability
+    parts = path.split("/")
+    return "/".join(parts[-2:]) if len(parts) > 2 else path
+
+def parse_claude_sessions(since: Optional[datetime] = None) -> list[UsageRecord]:
+    records: list[UsageRecord] = []
+    if not CLAUDE_DIR.exists():
+        return records
+
+    for project_dir in CLAUDE_DIR.iterdir():
+        if not project_dir.is_dir():
+            continue
+        project_name = project_slug_to_name(project_dir.name)
+        for jsonl_file in project_dir.glob("*.jsonl"):
+            session_id = jsonl_file.stem
+            try:
+                with open(jsonl_file, encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        msg = entry.get("message", {})
+                        if msg.get("role") != "assistant":
+                            continue
+                        usage = msg.get("usage")
+                        if not usage:
+                            continue
+                        model = msg.get("model", "unknown")
+
+                        ts_str = entry.get("timestamp")
+                        if ts_str:
+                            try:
+                                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                            except ValueError:
+                                ts = datetime.now(timezone.utc)
+                        else:
+                            ts = datetime.now(timezone.utc)
+
+                        if since and ts < since:
+                            continue
+
+                        rec = UsageRecord(
+                            timestamp=ts,
+                            project=project_name,
+                            session_id=session_id,
+                            model=model,
+                            input_tokens=usage.get("input_tokens", 0),
+                            output_tokens=usage.get("output_tokens", 0),
+                            cache_write_tokens=usage.get("cache_creation_input_tokens", 0),
+                            cache_read_tokens=usage.get("cache_read_input_tokens", 0),
+                        )
+                        records.append(rec)
+            except (OSError, PermissionError):
+                continue
+
+    return records
+
+
+# ── Display helpers ───────────────────────────────────────────────────────────
+try:
+    from rich.console import Console
+    from rich.table import Table
+    from rich import box
+    HAS_RICH = True
+    console = Console()
+except ImportError:
+    HAS_RICH = False
+
+def fmt_tokens(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.2f}M"
+    if n >= 1_000:
+        return f"{n/1_000:.1f}K"
+    return str(n)
+
+def fmt_cost(c: float) -> str:
+    if c < 0.01:
+        return f"${c:.4f}"
+    return f"${c:.2f}"
+
+def print_table_plain(title: str, headers: list[str], rows: list[list]):
+    print(f"\n{'─'*60}")
+    print(f"  {title}")
+    print(f"{'─'*60}")
+    widths = [max(len(str(r[i])) for r in ([headers] + rows)) for i in range(len(headers))]
+    fmt = "  " + "  ".join(f"{{:<{w}}}" for w in widths)
+    print(fmt.format(*headers))
+    print("  " + "  ".join("─" * w for w in widths))
+    for row in rows:
+        print(fmt.format(*[str(x) for x in row]))
+
+def print_table(title: str, headers: list[str], rows: list[list]):
+    if not HAS_RICH:
+        print_table_plain(title, headers, rows)
+        return
+    t = Table(title=title, box=box.SIMPLE_HEAD, show_edge=False)
+    right_cols = {"Input", "Output", "CacheW", "CacheR", "Total", "Requests", "Cost"}
+    for h in headers:
+        t.add_column(h, justify="right" if h in right_cols else "left")
+    for row in rows:
+        t.add_row(*[str(x) for x in row])
+    console.print(t)
+
+
+# ── Views ─────────────────────────────────────────────────────────────────────
+def view_daily(records: list[UsageRecord], days: int):
+    agg: dict[str, AggRow] = defaultdict(AggRow)
+    for r in records:
+        day = r.timestamp.astimezone().strftime("%Y-%m-%d")
+        agg[day].add(r)
+
+    rows = []
+    for day in sorted(agg.keys(), reverse=True)[:days]:
+        a = agg[day]
+        rows.append([day, fmt_tokens(a.input_tokens), fmt_tokens(a.output_tokens),
+                     fmt_tokens(a.cache_write_tokens), fmt_tokens(a.cache_read_tokens),
+                     fmt_tokens(a.total_tokens), a.requests, fmt_cost(a.cost)])
+
+    print_table("Daily Usage", ["Date", "Input", "Output", "CacheW", "CacheR", "Total", "Requests", "Cost"], rows)
+
+
+def view_projects(records: list[UsageRecord]):
+    agg: dict[str, AggRow] = defaultdict(AggRow)
+    for r in records:
+        agg[r.project].add(r)
+
+    rows = sorted(agg.items(), key=lambda x: x[1].cost, reverse=True)
+    table_rows = [[p, fmt_tokens(a.input_tokens), fmt_tokens(a.output_tokens),
+                   fmt_tokens(a.cache_write_tokens), fmt_tokens(a.cache_read_tokens),
+                   fmt_tokens(a.total_tokens), a.requests, fmt_cost(a.cost)]
+                  for p, a in rows]
+    print_table("By Project", ["Project", "Input", "Output", "CacheW", "CacheR", "Total", "Requests", "Cost"], table_rows)
+
+
+def view_models(records: list[UsageRecord]):
+    agg: dict[str, AggRow] = defaultdict(AggRow)
+    for r in records:
+        agg[r.model].add(r)
+
+    rows = sorted(agg.items(), key=lambda x: x[1].cost, reverse=True)
+    table_rows = [[m, fmt_tokens(a.input_tokens), fmt_tokens(a.output_tokens),
+                   fmt_tokens(a.cache_write_tokens), fmt_tokens(a.cache_read_tokens),
+                   fmt_tokens(a.total_tokens), a.requests, fmt_cost(a.cost)]
+                  for m, a in rows]
+    print_table("By Model", ["Model", "Input", "Output", "CacheW", "CacheR", "Total", "Requests", "Cost"], table_rows)
+
+
+def view_summary(records: list[UsageRecord]):
+    total = AggRow()
+    for r in records:
+        total.add(r)
+
+    print(f"\n  Total requests  : {total.requests:,}")
+    print(f"  Input tokens    : {fmt_tokens(total.input_tokens)}")
+    print(f"  Output tokens   : {fmt_tokens(total.output_tokens)}")
+    print(f"  Cache write     : {fmt_tokens(total.cache_write_tokens)}")
+    print(f"  Cache read      : {fmt_tokens(total.cache_read_tokens)}")
+    print(f"  Total tokens    : {fmt_tokens(total.total_tokens)}")
+    print(f"  Estimated cost  : {fmt_cost(total.cost)}")
+    print()
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+def main():
+    parser = argparse.ArgumentParser(
+        description="Track token usage across AI coding tools",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python tracker.py                  # Last 7 days summary
+  python tracker.py --days 30        # Last 30 days
+  python tracker.py --today          # Today only
+  python tracker.py --all            # All time
+  python tracker.py --projects       # Break down by project
+  python tracker.py --models         # Break down by model
+  python tracker.py --projects --models --days 30
+        """,
+    )
+    parser.add_argument("--days",     type=int, default=7,  help="Show last N days (default: 7)")
+    parser.add_argument("--today",    action="store_true",  help="Today only")
+    parser.add_argument("--all",      action="store_true",  help="All time (ignores --days)")
+    parser.add_argument("--projects", action="store_true",  help="Show breakdown by project")
+    parser.add_argument("--models",   action="store_true",  help="Show breakdown by model")
+    args = parser.parse_args()
+
+    # Determine time window
+    now = datetime.now(timezone.utc)
+    if args.all:
+        since = None
+        window_label = "all time"
+    elif args.today:
+        local_today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        since = local_today.astimezone(timezone.utc)
+        window_label = "today"
+    else:
+        since = now - timedelta(days=args.days)
+        window_label = f"last {args.days} days"
+
+    print(f"\n  Claude Code Token Tracker — {window_label}")
+    print(f"  Source: {CLAUDE_DIR}")
+
+    records = parse_claude_sessions(since=since)
+
+    if not records:
+        print("\n  No usage data found for this period.\n")
+        return
+
+    view_summary(records)
+    view_daily(records, days=9999 if args.all else (1 if args.today else args.days))
+
+    if args.projects:
+        view_projects(records)
+
+    if args.models:
+        view_models(records)
+
+    if not args.projects and not args.models:
+        # Always show models in default view as a bonus
+        view_models(records)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls /Users/nijianwei/Desktop/Github/token_tracker && echo \"---\" && ls ~/.claude/)"
+    ]
+  }
+}
