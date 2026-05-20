@@ -10,6 +10,32 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
+PRICING = {
+    "claude-opus-4-7":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
+    "claude-opus-4-5":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
+    "claude-sonnet-4-6": {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
+    "claude-sonnet-4-5": {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
+    "claude-haiku-4-5":  {"input":  0.80, "output":  4.00, "cache_write":  1.00, "cache_read": 0.08},
+}
+
+def calc_cost(rec: dict) -> float:
+    m = 1_000_000
+    model = rec.get("model", "")
+    p = PRICING.get(model, {})
+    if not p:
+        for k, v in PRICING.items():
+            if model.startswith(k.split("-20")[0]):
+                p = v; break
+    return (
+        rec.get("input_tokens", 0)                * p.get("input", 0)       / m +
+        rec.get("output_tokens", 0)               * p.get("output", 0)      / m +
+        rec.get("cache_creation_input_tokens", 0) * p.get("cache_write", 0) / m +
+        rec.get("cached_input_tokens", 0)         * p.get("cache_read", 0)  / m
+    )
+
+def total_cost(records: dict) -> float:
+    return sum(calc_cost(r) for r in records.values())
+
 REPO_DIR   = Path(__file__).parent
 DATA_FILE  = REPO_DIR / "data" / "usage.ndjson"
 CLAUDE_DIR = Path.home() / ".claude" / "projects"
@@ -166,6 +192,18 @@ def main():
         existing[key] = rec
 
     print(f"  合并后共 {len(existing)} 条（新增 {new_count}，更新 {updated_count}）")
+
+    # 异常检测：费用涨幅超过 20% 时警告
+    cost_before = total_cost(load_existing())
+    cost_after  = total_cost(existing)
+    if cost_before > 0:
+        pct = (cost_after - cost_before) / cost_before * 100
+        if pct > 20:
+            print(f"\n  ⚠️  费用异常：${cost_before:.2f} → ${cost_after:.2f} (+{pct:.0f}%)")
+            print("  可能存在重复计数，请检查后再推送。继续？[y/N] ", end="", flush=True)
+            if input().strip().lower() != "y":
+                print("  已取消。")
+                sys.exit(0)
 
     # 5. 写文件
     sorted_records = sorted(existing.values(), key=lambda r: (r["hour_start"], r["source"], r["model"]))
