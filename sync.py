@@ -41,6 +41,7 @@ def parse_claude_sessions() -> list:
         return []
 
     buckets: dict = {}
+    seen_msg_ids: set = set()  # 按 message.id 去重，避免重复计数
 
     for project_dir in CLAUDE_DIR.iterdir():
         if not project_dir.is_dir():
@@ -66,6 +67,13 @@ def parse_claude_sessions() -> list:
                         model = msg.get("model", "unknown")
                         if not model or model.startswith("<"):
                             continue
+
+                        # 同一条消息在 JSONL 里可能出现多次，只取第一次
+                        msg_id = msg.get("id")
+                        if msg_id and msg_id in seen_msg_ids:
+                            continue
+                        if msg_id:
+                            seen_msg_ids.add(msg_id)
 
                         ts_str = entry.get("timestamp", "")
                         try:
