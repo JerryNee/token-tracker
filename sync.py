@@ -177,6 +177,7 @@ def git_push(new_count: int, updated_count: int):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     msg = f"sync: +{new_count} new, ~{updated_count} updated ({now})"
     cmds = [
+        ["git", "pull", "--rebase"],
         ["git", "add", "data/usage.ndjson"],
         ["git", "commit", "-m", msg],
         ["git", "push"],
