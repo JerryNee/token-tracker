@@ -22,6 +22,12 @@ PRICING = {
     # Claude Haiku 4
     "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00, "cache_write": 1.00, "cache_read": 0.08},
     "claude-haiku-4-5": {"input": 0.80, "output": 4.00, "cache_write": 1.00, "cache_read": 0.08},
+    # Gemini models
+    "gemini-3.5-flash": {"input": 1.50, "output": 9.00, "cache_write": 0.375, "cache_read": 0.15},
+    "gemini-2.5-pro":   {"input": 1.25, "output": 5.00, "cache_write": 0.3125, "cache_read": 0.125},
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50, "cache_write": 0.075, "cache_read": 0.03},
+    "gemini-2.0-pro":   {"input": 1.25, "output": 5.00, "cache_write": 0.3125, "cache_read": 0.125},
+    "gemini-2.0-flash": {"input": 0.075, "output": 0.30, "cache_write": 0.01875, "cache_read": 0.01875},
 }
 
 def get_price(model: str, kind: str) -> float:
@@ -97,6 +103,63 @@ def project_slug_to_name(slug: str) -> str:
     # Keep only last 2 components for readability
     parts = path.split("/")
     return "/".join(parts[-2:]) if len(parts) > 2 else path
+
+TT_QUEUE   = Path.home() / ".tokentracker" / "tracker" / "queue.jsonl"
+
+def parse_antigravity_sessions(since: Optional[datetime] = None) -> list[UsageRecord]:
+    records: list[UsageRecord] = []
+    if not TT_QUEUE.exists():
+        return records
+
+    try:
+        with open(TT_QUEUE, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                if rec.get("source") != "antigravity":
+                    continue
+
+                # Parse timestamp from hour_start
+                hour_start = rec.get("hour_start")
+                if not hour_start:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(hour_start.replace("Z", "+00:00"))
+                except ValueError:
+                    ts = datetime.now(timezone.utc)
+
+                if since and ts < since:
+                    continue
+
+                # Check for zero tokens
+                if (rec.get("input_tokens", 0) == 0
+                        and rec.get("cached_input_tokens", 0) == 0
+                        and rec.get("cache_creation_input_tokens", 0) == 0
+                        and rec.get("output_tokens", 0) == 0):
+                    continue
+
+                urec = UsageRecord(
+                    timestamp=ts,
+                    project="Antigravity Workspace",
+                    session_id="hourly-bucket",
+                    model=rec.get("model", "unknown"),
+                    input_tokens=rec.get("input_tokens", 0),
+                    output_tokens=rec.get("output_tokens", 0),
+                    cache_write_tokens=rec.get("cache_creation_input_tokens", 0),
+                    cache_read_tokens=rec.get("cached_input_tokens", 0),
+                )
+                records.append(urec)
+    except Exception as e:
+        print(f"  解析 TokenTracker 队列时出错: {e}")
+
+    return records
+
 
 def parse_claude_sessions(since: Optional[datetime] = None) -> list[UsageRecord]:
     records: list[UsageRecord] = []
@@ -314,10 +377,12 @@ Examples:
         since = now - timedelta(days=args.days)
         window_label = f"last {args.days} days"
 
-    print(f"\n  Claude Code Token Tracker — {window_label}")
-    print(f"  Source: {CLAUDE_DIR}")
+    print(f"\n  AI Token Tracker — {window_label}")
+    print(f"  Source: Claude Code ({CLAUDE_DIR}) & Antigravity ({TT_QUEUE if TT_QUEUE.exists() else 'not found'})")
 
     records = parse_claude_sessions(since=since)
+    antigravity_records = parse_antigravity_sessions(since=since)
+    records.extend(antigravity_records)
 
     if not records:
         print("\n  No usage data found for this period.\n")

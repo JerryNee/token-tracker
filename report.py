@@ -27,6 +27,12 @@ PRICING = {
     "gpt-4.1-mini":              {"input":  0.40, "output":  1.60, "cache_write":  0.00, "cache_read": 0.10},
     "o3":                        {"input": 10.00, "output": 40.00, "cache_write":  0.00, "cache_read": 2.50},
     "o4-mini":                   {"input":  1.10, "output":  4.40, "cache_write":  0.00, "cache_read": 0.275},
+    # Gemini models
+    "gemini-3.5-flash":          {"input":  1.50, "output":  9.00, "cache_write":  0.375, "cache_read": 0.15},
+    "gemini-2.5-pro":            {"input":  1.25, "output":  5.00, "cache_write":  0.3125, "cache_read": 0.125},
+    "gemini-2.5-flash":          {"input":  0.30, "output":  2.50, "cache_write":  0.075, "cache_read": 0.03},
+    "gemini-2.0-pro":            {"input":  1.25, "output":  5.00, "cache_write":  0.3125, "cache_read": 0.125},
+    "gemini-2.0-flash":          {"input":  0.075, "output":  0.30, "cache_write":  0.01875, "cache_read": 0.01875},
 }
 
 # 工具来源的中文名
@@ -35,6 +41,7 @@ SOURCE_NAMES = {
     "cursor":       "Cursor",
     "copilot":      "GitHub Copilot",
     "gemini":       "Gemini CLI",
+    "antigravity":  "Antigravity CLI",
     "codex":        "Codex CLI",
     "every-code":   "Every Code",
     "opencode":     "OpenCode",
@@ -223,10 +230,8 @@ def generate_readme(records: list) -> str:
 
 {make_table(["模型"] + headers, model_table)}
 
----
-
-> 费用为估算值，基于 [Anthropic](https://www.anthropic.com/pricing) / [OpenAI](https://openai.com/api/pricing/) 官方定价。
-> 数据来源：`~/.claude/projects/` 会话文件，由 sync.py 每日自动备份。
+> 费用为估算值，基于 [Anthropic](https://www.anthropic.com/pricing) / [OpenAI](https://openai.com/api/pricing/) / [Google Gemini](https://ai.google.dev/pricing) 官方定价。
+> 数据来源：`~/.claude/projects/` 会话文件及 `~/.tokentracker/tracker/`，由 sync.py 自动备份。
 """
 
 

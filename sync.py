@@ -16,6 +16,12 @@ PRICING = {
     "claude-sonnet-4-6": {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
     "claude-sonnet-4-5": {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
     "claude-haiku-4-5":  {"input":  0.80, "output":  4.00, "cache_write":  1.00, "cache_read": 0.08},
+    # Gemini models
+    "gemini-3.5-flash": {"input": 1.50, "output": 9.00, "cache_write": 0.375, "cache_read": 0.15},
+    "gemini-2.5-pro":   {"input": 1.25, "output": 5.00, "cache_write": 0.3125, "cache_read": 0.125},
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50, "cache_write": 0.075, "cache_read": 0.03},
+    "gemini-2.0-pro":   {"input": 1.25, "output": 5.00, "cache_write": 0.3125, "cache_read": 0.125},
+    "gemini-2.0-flash": {"input": 0.075, "output": 0.30, "cache_write": 0.01875, "cache_read": 0.01875},
 }
 
 def calc_cost(rec: dict) -> float:
@@ -39,6 +45,7 @@ def total_cost(records: dict) -> float:
 REPO_DIR   = Path(__file__).parent
 DATA_FILE  = REPO_DIR / "data" / "usage.ndjson"
 CLAUDE_DIR = Path.home() / ".claude" / "projects"
+TT_QUEUE   = Path.home() / ".tokentracker" / "tracker" / "queue.jsonl"
 
 
 # ── 读取已有备份 ──────────────────────────────────────────────────────────────
@@ -58,6 +65,59 @@ def load_existing() -> dict:
             except (json.JSONDecodeError, KeyError):
                 continue
     return existing
+
+
+# ── 解析 Antigravity 会话文件 (通过 TokenTracker) ─────────────────────────────
+def parse_antigravity_sessions() -> list:
+    if not TT_QUEUE.exists():
+        print(f"  找不到 TokenTracker 队列数据: {TT_QUEUE}")
+        return []
+
+    print("  运行 TokenTracker sync...")
+    try:
+        subprocess.run("npx tokentracker-cli sync --auto", shell=True, capture_output=True, timeout=30)
+    except Exception as e:
+        print(f"  TokenTracker sync 失败: {e}")
+
+    records = []
+    try:
+        with open(TT_QUEUE, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                
+                # 过滤出 source 为 antigravity 的记录
+                if rec.get("source") != "antigravity":
+                    continue
+                
+                # 跳过无 tokens 的记录
+                if (rec.get("input_tokens", 0) == 0
+                        and rec.get("cached_input_tokens", 0) == 0
+                        and rec.get("cache_creation_input_tokens", 0) == 0
+                        and rec.get("output_tokens", 0) == 0):
+                    continue
+                
+                mapped = {
+                    "source":                      "antigravity",
+                    "model":                       rec.get("model", "unknown"),
+                    "hour_start":                  rec.get("hour_start"),
+                    "input_tokens":                rec.get("input_tokens", 0),
+                    "cached_input_tokens":         rec.get("cached_input_tokens", 0),
+                    "cache_creation_input_tokens": rec.get("cache_creation_input_tokens", 0),
+                    "output_tokens":               rec.get("output_tokens", 0),
+                    "total_tokens":                rec.get("total_tokens", 0),
+                    "conversations":               rec.get("conversation_count", 0),
+                }
+                records.append(mapped)
+    except Exception as e:
+        print(f"  解析 TokenTracker 队列时出错: {e}")
+
+    return records
 
 
 # ── 解析 Claude Code 会话文件 ─────────────────────────────────────────────────
@@ -175,7 +235,12 @@ def main():
     # 3. 扫描本地会话
     print("  扫描 Claude Code 会话...")
     new_records = parse_claude_sessions()
-    print(f"  解析到 {len(new_records)} 条小时记录")
+    print(f"  解析到 {len(new_records)} 条 Claude Code 小时记录")
+
+    print("  扫描 Antigravity 会话...")
+    antigravity_records = parse_antigravity_sessions()
+    print(f"  解析到 {len(antigravity_records)} 条 Antigravity 小时记录")
+    new_records.extend(antigravity_records)
 
     if not new_records:
         print("  没有数据，退出。")

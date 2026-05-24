@@ -2,33 +2,34 @@
 
 自动追踪 AI 编程工具的 token 用量与费用估算。
 
-> 数据来源：Claude Code、claude
-> 最后更新：2026-05-23 15:46 UTC | 数据范围：2026-05-19 ~ 2026-05-23
+> 数据来源：Antigravity CLI、Claude Code、claude
+> 最后更新：2026-05-24 03:48 UTC | 数据范围：2026-05-19 ~ 2026-05-24
 
 ## 全量汇总
 
 | 指标 | 数值 |
 |------|------|
-| 总对话数 | 2,459 |
-| Input tokens | 18.7K |
-| Output tokens | 1.74M |
+| 总对话数 | 2,614 |
+| Input tokens | 102.6K |
+| Output tokens | 1.77M |
 | Cache 写入 | 15.50M |
 | Cache 读取 | 555.40M |
-| 总 tokens | 572.65M |
-| **估算总费用** | **$1039.83** |
+| 总 tokens | 572.77M |
+| **估算总费用** | **$1040.22** |
 
 ## 按月统计
 
-| 月份      | Input | Output | CacheW | CacheR  | Total   | 对话数  | 费用       |
-| ------- | ----- | ------ | ------ | ------- | ------- | ---- | -------- |
-| 2026-05 | 18.7K |  1.74M | 15.50M | 555.40M | 572.65M | 2459 | $1039.78 |
+| 月份      | Input  | Output | CacheW | CacheR  | Total   | 对话数  | 费用       |
+| ------- | ------ | ------ | ------ | ------- | ------- | ---- | -------- |
+| 2026-05 | 102.6K |  1.77M | 15.50M | 555.40M | 572.77M | 2614 | $1040.17 |
 
 ## 按工具统计
 
-| 工具          | Input | Output | CacheW | CacheR  | Total   | 对话数  | 费用      |
-| ----------- | ----- | ------ | ------ | ------- | ------- | ---- | ------- |
-| Claude Code | 13.8K |  1.31M | 12.30M | 368.85M | 382.48M | 2112 | $744.25 |
-| claude      |  4.9K | 421.9K |  3.20M | 186.55M | 190.17M |  347 | $295.53 |
+| 工具              | Input | Output | CacheW | CacheR  | Total   | 对话数  | 费用      |
+| --------------- | ----- | ------ | ------ | ------- | ------- | ---- | ------- |
+| Claude Code     | 13.8K |  1.31M | 12.30M | 368.85M | 382.48M | 2112 | $744.25 |
+| claude          |  4.9K | 421.9K |  3.20M | 186.55M | 190.17M |  347 | $295.53 |
+| Antigravity CLI | 83.9K |  29.9K |      0 |       0 |  113.8K |  155 |   $0.39 |
 
 ## 按模型统计
 
@@ -36,8 +37,7 @@
 | ----------------- | ----- | ------ | ------ | ------- | ------- | ---- | ------- |
 | claude-opus-4-7   | 14.9K |  1.21M |  7.55M | 502.38M | 511.15M | 1811 | $986.21 |
 | claude-sonnet-4-6 |  3.8K | 522.7K |  7.96M |  53.02M |  61.50M |  648 |  $53.56 |
+| gemini-3.5-flash  | 83.9K |  29.9K |      0 |       0 |  113.8K |  155 |   $0.39 |
 
----
-
-> 费用为估算值，基于 [Anthropic](https://www.anthropic.com/pricing) / [OpenAI](https://openai.com/api/pricing/) 官方定价。
-> 数据来源：`~/.claude/projects/` 会话文件，由 sync.py 每日自动备份。
+> 费用为估算值，基于 [Anthropic](https://www.anthropic.com/pricing) / [OpenAI](https://openai.com/api/pricing/) / [Google Gemini](https://ai.google.dev/pricing) 官方定价。
+> 数据来源：`~/.claude/projects/` 会话文件及 `~/.tokentracker/tracker/`，由 sync.py 自动备份。
