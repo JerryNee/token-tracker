@@ -194,6 +194,27 @@ def generate_readme(records: list) -> str:
         for m, a in model_rows
     ]
 
+    # ── 按设备汇总 ──
+    by_device = defaultdict(lambda: defaultdict(int))
+    for r in records:
+        dev = r.get("device", "unknown")
+        d = by_device[dev]
+        d["input"]  += r.get("input_tokens", 0)
+        d["output"] += r.get("output_tokens", 0)
+        d["cw"]     += r.get("cache_creation_input_tokens", 0)
+        d["cr"]     += r.get("cached_input_tokens", 0)
+        d["conv"]   += r.get("conversations", 0)
+        d["cost_x1000"] += int(calc_cost(r) * 1000)
+
+    device_rows = sorted(by_device.items(), key=lambda x: x[1]["cost_x1000"], reverse=True)
+    device_table = [
+        [dev, fmt_tokens(a["input"]), fmt_tokens(a["output"]),
+         fmt_tokens(a["cw"]), fmt_tokens(a["cr"]),
+         fmt_tokens(a["input"]+a["output"]+a["cw"]+a["cr"]),
+         a["conv"], fmt_cost(a["cost_x1000"]/1000)]
+        for dev, a in device_rows
+    ]
+
     headers = ["Input", "Output", "CacheW", "CacheR", "Total", "对话数", "费用"]
     date_range  = f"{records[0]['hour_start'][:10]} ~ {records[-1]['hour_start'][:10]}"
     updated_at  = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
@@ -229,6 +250,10 @@ def generate_readme(records: list) -> str:
 ## 按模型统计
 
 {make_table(["模型"] + headers, model_table)}
+
+## 按设备统计
+
+{make_table(["设备"] + headers, device_table)}
 
 > 费用为估算值，基于 [Anthropic](https://www.anthropic.com/pricing) / [OpenAI](https://openai.com/api/pricing/) / [Google Gemini](https://ai.google.dev/pricing) 官方定价。
 > 数据来源：`~/.claude/projects/` 会话文件及 `~/.tokentracker/tracker/`，由 sync.py 自动备份。

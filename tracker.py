@@ -5,11 +5,14 @@ import json
 import os
 import sys
 import argparse
+import socket
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
+
+DEVICE = socket.gethostname()
 
 # ── Pricing (USD per 1M tokens) ──────────────────────────────────────────────
 PRICING = {
@@ -49,6 +52,7 @@ class UsageRecord:
     project: str
     session_id: str
     model: str
+    device: str = "unknown"
     input_tokens: int = 0
     output_tokens: int = 0
     cache_write_tokens: int = 0
@@ -149,6 +153,7 @@ def parse_antigravity_sessions(since: Optional[datetime] = None) -> list[UsageRe
                     project="Antigravity Workspace",
                     session_id="hourly-bucket",
                     model=rec.get("model", "unknown"),
+                    device=rec.get("device", DEVICE),
                     input_tokens=rec.get("input_tokens", 0),
                     output_tokens=rec.get("output_tokens", 0),
                     cache_write_tokens=rec.get("cache_creation_input_tokens", 0),
@@ -225,6 +230,7 @@ def parse_claude_sessions(since: Optional[datetime] = None) -> list[UsageRecord]
                             project=project_name,
                             session_id=session_id,
                             model=model,
+                            device=DEVICE,
                             input_tokens=usage.get("input_tokens", 0),
                             output_tokens=usage.get("output_tokens", 0),
                             cache_write_tokens=usage.get("cache_creation_input_tokens", 0),
@@ -326,6 +332,19 @@ def view_models(records: list[UsageRecord]):
     print_table("By Model", ["Model", "Input", "Output", "CacheW", "CacheR", "Total", "Requests", "Cost"], table_rows)
 
 
+def view_devices(records: list[UsageRecord]):
+    agg: dict[str, AggRow] = defaultdict(AggRow)
+    for r in records:
+        agg[r.device].add(r)
+
+    rows = sorted(agg.items(), key=lambda x: x[1].cost, reverse=True)
+    table_rows = [[d, fmt_tokens(a.input_tokens), fmt_tokens(a.output_tokens),
+                   fmt_tokens(a.cache_write_tokens), fmt_tokens(a.cache_read_tokens),
+                   fmt_tokens(a.total_tokens), a.requests, fmt_cost(a.cost)]
+                  for d, a in rows]
+    print_table("By Device", ["Device", "Input", "Output", "CacheW", "CacheR", "Total", "Requests", "Cost"], table_rows)
+
+
 def view_summary(records: list[UsageRecord]):
     total = AggRow()
     for r in records:
@@ -362,6 +381,7 @@ Examples:
     parser.add_argument("--all",      action="store_true",  help="All time (ignores --days)")
     parser.add_argument("--projects", action="store_true",  help="Show breakdown by project")
     parser.add_argument("--models",   action="store_true",  help="Show breakdown by model")
+    parser.add_argument("--devices",  action="store_true",  help="Show breakdown by device")
     args = parser.parse_args()
 
     # Determine time window
@@ -397,7 +417,10 @@ Examples:
     if args.models:
         view_models(records)
 
-    if not args.projects and not args.models:
+    if args.devices:
+        view_devices(records)
+
+    if not args.projects and not args.models and not args.devices:
         # Always show models in default view as a bonus
         view_models(records)
 

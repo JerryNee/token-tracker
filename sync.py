@@ -7,8 +7,11 @@
 import json
 import subprocess
 import sys
+import socket
 from pathlib import Path
 from datetime import datetime
+
+DEVICE = socket.gethostname()
 
 PRICING = {
     "claude-opus-4-7":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
@@ -60,7 +63,7 @@ def load_existing() -> dict:
                 continue
             try:
                 rec = json.loads(line)
-                key = (rec["source"], rec["model"], rec["hour_start"])
+                key = (rec["source"], rec["model"], rec["hour_start"], rec.get("device", "unknown"))
                 existing[key] = rec
             except (json.JSONDecodeError, KeyError):
                 continue
@@ -106,6 +109,7 @@ def parse_antigravity_sessions() -> list:
                     "source":                      "antigravity",
                     "model":                       rec.get("model", "unknown"),
                     "hour_start":                  rec.get("hour_start"),
+                    "device":                      DEVICE,
                     "input_tokens":                rec.get("input_tokens", 0),
                     "cached_input_tokens":         rec.get("cached_input_tokens", 0),
                     "cache_creation_input_tokens": rec.get("cache_creation_input_tokens", 0),
@@ -175,6 +179,7 @@ def parse_claude_sessions() -> list:
                             "source":                      "claude-code",
                             "model":                       model,
                             "hour_start":                  hour_start,
+                            "device":                      DEVICE,
                             "input_tokens":                0,
                             "cached_input_tokens":         0,
                             "cache_creation_input_tokens": 0,
@@ -251,7 +256,7 @@ def main():
     # 4. 合并
     new_count = updated_count = 0
     for rec in new_records:
-        key = (rec["source"], rec["model"], rec["hour_start"])
+        key = (rec["source"], rec["model"], rec["hour_start"], rec.get("device", "unknown"))
         if key in existing:
             updated_count += 1
         else:
@@ -273,7 +278,7 @@ def main():
                 sys.exit(0)
 
     # 5. 写文件
-    sorted_records = sorted(existing.values(), key=lambda r: (r["hour_start"], r["source"], r["model"]))
+    sorted_records = sorted(existing.values(), key=lambda r: (r["hour_start"], r["source"], r["model"], r.get("device", "unknown")))
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         for rec in sorted_records:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
