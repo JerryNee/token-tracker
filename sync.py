@@ -207,10 +207,11 @@ def git_commit_push(new_count: int, updated_count: int):
         ["git", "push"],
     ]
     for cmd in cmds:
-        result = subprocess.run(cmd, cwd=REPO_DIR, capture_output=True, text=True)
+        result = subprocess.run(cmd, cwd=REPO_DIR, capture_output=True)
         if result.returncode != 0:
             print(f"  命令失败: {' '.join(cmd)}")
-            print(f"  {result.stderr.strip()}")
+            stderr = result.stderr.decode("utf-8", errors="ignore").strip()
+            print(f"  {stderr}")
             return False
     return True
 
@@ -222,9 +223,10 @@ def main():
 
     # 1. 先 pull（此时还没写任何文件，不会有 unstaged changes）
     print("  拉取远程最新...")
-    pull = subprocess.run(["git", "pull", "--rebase"], cwd=REPO_DIR, capture_output=True, text=True)
+    pull = subprocess.run(["git", "pull", "--rebase"], cwd=REPO_DIR, capture_output=True)
     if pull.returncode != 0:
-        print(f"  pull 失败: {pull.stderr.strip()}")
+        stderr = pull.stderr.decode("utf-8", errors="ignore").strip()
+        print(f"  pull 失败: {stderr}")
         sys.exit(1)
 
     # 2. 读取备份（pull 后的最新状态）
