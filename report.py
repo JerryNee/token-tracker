@@ -15,6 +15,7 @@ DATA_FILE = REPO_DIR / "data" / "usage.ndjson"
 # ── 定价（USD / 1M tokens）──────────────────────────────────────────────────
 PRICING = {
     "claude-opus-4-7":           {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
+    "claude-opus-4-6":           {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
     "claude-opus-4-5":           {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
     "claude-sonnet-4-6":         {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
     "claude-sonnet-4-5":         {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
@@ -28,11 +29,12 @@ PRICING = {
     "o3":                        {"input": 10.00, "output": 40.00, "cache_write":  0.00, "cache_read": 2.50},
     "o4-mini":                   {"input":  1.10, "output":  4.40, "cache_write":  0.00, "cache_read": 0.275},
     # Gemini models
-    "gemini-3.5-flash":          {"input":  1.50, "output":  9.00, "cache_write":  0.375, "cache_read": 0.15},
+    "gemini-3.5-flash":          {"input":  1.50, "output":  9.00, "cache_write":  0.375,  "cache_read": 0.15},
+    "gemini-3.1-pro":            {"input":  1.25, "output":  5.00, "cache_write":  0.3125, "cache_read": 0.125},
     "gemini-2.5-pro":            {"input":  1.25, "output":  5.00, "cache_write":  0.3125, "cache_read": 0.125},
-    "gemini-2.5-flash":          {"input":  0.30, "output":  2.50, "cache_write":  0.075, "cache_read": 0.03},
+    "gemini-2.5-flash":          {"input":  0.30, "output":  2.50, "cache_write":  0.075,  "cache_read": 0.03},
     "gemini-2.0-pro":            {"input":  1.25, "output":  5.00, "cache_write":  0.3125, "cache_read": 0.125},
-    "gemini-2.0-flash":          {"input":  0.075, "output":  0.30, "cache_write":  0.01875, "cache_read": 0.01875},
+    "gemini-2.0-flash":          {"input":  0.075,"output":  0.30, "cache_write":  0.01875,"cache_read": 0.01875},
 }
 
 # 工具来源的中文名
@@ -51,11 +53,21 @@ SOURCE_NAMES = {
 }
 
 
+import re as _re
+
+def _normalize_model(model: str) -> str:
+    """Normalize trailing version dots to dashes: claude-opus-4.6 → claude-opus-4-6.
+    Leaves family-name dots like gemini-3.5-flash untouched.
+    """
+    return _re.sub(r'(?<=\d)\.(?=\d+$)', '-', model)
+
+
 def get_price(model: str, kind: str) -> float:
+    model = _normalize_model(model)
     if model in PRICING:
         return PRICING[model].get(kind, 0.0)
     for key, prices in PRICING.items():
-        if model.startswith(key.split("-20")[0]):
+        if model.startswith(key) or key.startswith(model.split("-20")[0]):
             return prices.get(kind, 0.0)
     return 0.0
 
