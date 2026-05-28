@@ -72,8 +72,10 @@ def load_existing() -> dict:
                 continue
             try:
                 rec = json.loads(line)
-                # 早期 TokenTracker 集成阶段写过 :30 分桶，与新整点桶并存会双重计数 — 丢弃。
-                if rec.get("hour_start", "")[14:16] != "00":
+                # 早期 TokenTracker 集成阶段，claude-code 数据曾按 :30 分桶写入；
+                # 当前 sync 始终用 :00，两者并存会双重计数 — 仅对 claude-code 丢弃 :30。
+                # antigravity 的 :30 来自 TT_QUEUE 原文，是独立桶，必须保留。
+                if rec.get("source") == "claude-code" and rec.get("hour_start", "")[14:16] != "00":
                     continue
                 key = (rec["source"], rec["model"], rec["hour_start"], rec.get("device", "unknown"))
                 existing[key] = rec
