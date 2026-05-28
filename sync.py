@@ -42,10 +42,12 @@ PRICING = {
 }
 
 def _normalize_model(model: str) -> str:
-    """Normalize model name: replace dots with dashes (e.g. claude-opus-4.6 → claude-opus-4-6)."""
-    # Only replace dots that are between digits (version separators), not in domain names etc.
+    """Normalize model name: replace dots between digits only when they appear
+    at the end of the string (version suffix), e.g. claude-opus-4.6 → claude-opus-4-6.
+    Leaves family-name dots like gemini-3.5-flash untouched.
+    """
     import re
-    return re.sub(r'(?<=\d)\.(?=\d)', '-', model)
+    return re.sub(r'(?<=\d)\.(?=\d+$)', '-', model)
 
 
 def calc_cost(rec: dict) -> float:
