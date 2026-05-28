@@ -25,6 +25,7 @@ DEVICE = _canonical_device()
 PRICING = {
     # Claude Opus 4
     "claude-opus-4-7":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
+    "claude-opus-4-6":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
     "claude-opus-4-5":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
     # Claude Sonnet 4
     "claude-sonnet-4-6": {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
@@ -33,15 +34,25 @@ PRICING = {
     "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00, "cache_write": 1.00, "cache_read": 0.08},
     "claude-haiku-4-5": {"input": 0.80, "output": 4.00, "cache_write": 1.00, "cache_read": 0.08},
     # Gemini models
-    "gemini-3.5-flash": {"input": 1.50, "output": 9.00, "cache_write": 0.375, "cache_read": 0.15},
-    "gemini-2.5-pro":   {"input": 1.25, "output": 5.00, "cache_write": 0.3125, "cache_read": 0.125},
-    "gemini-2.5-flash": {"input": 0.30, "output": 2.50, "cache_write": 0.075, "cache_read": 0.03},
-    "gemini-2.0-pro":   {"input": 1.25, "output": 5.00, "cache_write": 0.3125, "cache_read": 0.125},
-    "gemini-2.0-flash": {"input": 0.075, "output": 0.30, "cache_write": 0.01875, "cache_read": 0.01875},
+    "gemini-3.5-flash": {"input": 1.50, "output": 9.00,  "cache_write": 0.375,   "cache_read": 0.15},
+    "gemini-3.1-pro":   {"input": 1.25, "output": 5.00,  "cache_write": 0.3125,  "cache_read": 0.125},
+    "gemini-2.5-pro":   {"input": 1.25, "output": 5.00,  "cache_write": 0.3125,  "cache_read": 0.125},
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50,  "cache_write": 0.075,   "cache_read": 0.03},
+    "gemini-2.0-pro":   {"input": 1.25, "output": 5.00,  "cache_write": 0.3125,  "cache_read": 0.125},
+    "gemini-2.0-flash": {"input": 0.075,"output": 0.30,  "cache_write": 0.01875, "cache_read": 0.01875},
 }
+
+import re as _re
+
+def _normalize_model(model: str) -> str:
+    """Normalize model name: replace dots between digits with dashes
+    (e.g. claude-opus-4.6 → claude-opus-4-6)."""
+    return _re.sub(r'(?<=\d)\.(?=\d)', '-', model)
+
 
 def get_price(model: str, kind: str) -> float:
     """Return price per 1M tokens for a model+kind, falling back to family match."""
+    model = _normalize_model(model)
     if model in PRICING:
         return PRICING[model].get(kind, 0.0)
     # Fuzzy family match
