@@ -12,7 +12,14 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-DEVICE = socket.gethostname()
+def _canonical_device() -> str:
+    h = socket.gethostname()
+    if "MacBook" in h or h.startswith("Mac.") or h == "Mac":
+        return "Jerrys-MacBook-Pro-403.local"
+    return h
+
+
+DEVICE = _canonical_device()
 
 # ── Pricing (USD per 1M tokens) ──────────────────────────────────────────────
 PRICING = {

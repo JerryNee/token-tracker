@@ -11,7 +11,16 @@ import socket
 from pathlib import Path
 from datetime import datetime
 
-DEVICE = socket.gethostname()
+def _canonical_device() -> str:
+    """Hostname 在不同网络下会变 (Mac.mshome.net, Jerrys-MacBook-Pro-403.local…)，
+    导致同小时桶按 device 拆成两条 → 双重计数。把所有 Mac 主机规整到一个名字。"""
+    h = socket.gethostname()
+    if "MacBook" in h or h.startswith("Mac.") or h == "Mac":
+        return "Jerrys-MacBook-Pro-403.local"
+    return h
+
+
+DEVICE = _canonical_device()
 
 PRICING = {
     "claude-opus-4-7":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
