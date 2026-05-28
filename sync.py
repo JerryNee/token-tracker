@@ -63,6 +63,9 @@ def load_existing() -> dict:
                 continue
             try:
                 rec = json.loads(line)
+                # 早期 TokenTracker 集成阶段写过 :30 分桶，与新整点桶并存会双重计数 — 丢弃。
+                if rec.get("hour_start", "")[14:16] != "00":
+                    continue
                 key = (rec["source"], rec["model"], rec["hour_start"], rec.get("device", "unknown"))
                 existing[key] = rec
             except (json.JSONDecodeError, KeyError):
