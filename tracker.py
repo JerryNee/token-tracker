@@ -6,6 +6,8 @@ import os
 import sys
 import argparse
 import socket
+import subprocess
+import platform
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
@@ -13,8 +15,21 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 def _canonical_device() -> str:
+    """与 sync.py 保持一致：macOS 优先用 scutil LocalHostName（跨网络稳定）。"""
+    if platform.system() == "Darwin":
+        try:
+            name = subprocess.check_output(
+                ["scutil", "--get", "LocalHostName"],
+                stderr=subprocess.DEVNULL, timeout=2,
+            ).decode().strip()
+            if name:
+                return name + ".local"
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            pass
     h = socket.gethostname()
     if "MacBook" in h or h.startswith("Mac.") or h == "Mac":
+        return "Jerrys-MacBook-Pro-403.local"
+    if platform.system() == "Darwin":
         return "Jerrys-MacBook-Pro-403.local"
     return h
 

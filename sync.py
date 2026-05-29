@@ -8,14 +8,28 @@ import json
 import subprocess
 import sys
 import socket
+import platform
 from pathlib import Path
 from datetime import datetime
 
 def _canonical_device() -> str:
-    """Hostname 在不同网络下会变 (Mac.mshome.net, Jerrys-MacBook-Pro-403.local…)，
-    导致同小时桶按 device 拆成两条 → 双重计数。把所有 Mac 主机规整到一个名字。"""
+    """Hostname 在不同网络下会变 (Mac.mshome.net, wirelessprv-…illinois.edu, …)，
+    导致同小时桶按 device 拆成两条 → 双重计数。
+    优先用 macOS 的 LocalHostName（与网络无关），兜底再用 hostname 关键词匹配。"""
+    if platform.system() == "Darwin":
+        try:
+            name = subprocess.check_output(
+                ["scutil", "--get", "LocalHostName"],
+                stderr=subprocess.DEVNULL, timeout=2,
+            ).decode().strip()
+            if name:
+                return name + ".local"
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            pass
     h = socket.gethostname()
     if "MacBook" in h or h.startswith("Mac.") or h == "Mac":
+        return "Jerrys-MacBook-Pro-403.local"
+    if platform.system() == "Darwin":
         return "Jerrys-MacBook-Pro-403.local"
     return h
 
@@ -282,10 +296,16 @@ def main():
         print("  没有数据，退出。")
         return
 
-    # 4. 合并
+    # 4. 合并 + 检测同时段同 (source, model) 下出现新 device（hostname 漂移）
+    cost_before = sum(calc_cost(r) for r in existing.values())
+    existing_by_smh = {(k[0], k[1], k[2]): k[3] for k in existing.keys()}
     new_count = updated_count = 0
+    device_drift = []  # (source, model, hour_start, old_device, new_device)
     for rec in new_records:
         key = (rec["source"], rec["model"], rec["hour_start"], rec.get("device", "unknown"))
+        smh = (rec["source"], rec["model"], rec["hour_start"])
+        if smh in existing_by_smh and existing_by_smh[smh] != key[3]:
+            device_drift.append((*smh, existing_by_smh[smh], key[3]))
         if key in existing:
             updated_count += 1
         else:
@@ -294,9 +314,19 @@ def main():
 
     print(f"  合并后共 {len(existing)} 条（新增 {new_count}，更新 {updated_count}）")
 
+    # 异常检测：device 漂移 — 同 (source, model, hour) 下出现两个 device
+    if device_drift:
+        print(f"\n  ⚠️  device 漂移检测到 {len(device_drift)} 条同时段桶被分配到新 device：")
+        for s, m, h, old_dev, new_dev in device_drift[:5]:
+            print(f"     {s}/{m}@{h}  {old_dev!r} → {new_dev!r}")
+        if len(device_drift) > 5:
+            print(f"     ... 还有 {len(device_drift)-5} 条")
+        print(f"  本机 _canonical_device() = {DEVICE!r}")
+        print(f"  这会让历史桶被双计数。检查 _canonical_device() 是否识别当前 hostname。中止。")
+        sys.exit(2)
+
     # 异常检测：费用涨幅超过 20% 时警告
-    cost_before = total_cost(load_existing())
-    cost_after  = total_cost(existing)
+    cost_after = sum(calc_cost(r) for r in existing.values())
     if cost_before > 0:
         pct = (cost_after - cost_before) / cost_before * 100
         if pct > 20:
