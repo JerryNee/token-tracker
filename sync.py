@@ -265,12 +265,80 @@ def git_commit_push(new_count: int, updated_count: int):
     return True
 
 
+# ── 处理未提交改动（commit / stash 二选一）──────────────────────────────────
+def has_uncommitted_changes() -> bool:
+    """git pull --rebase 会被已跟踪文件的未提交改动（staged/unstaged）阻塞。
+    未跟踪文件不阻塞，所以用 `git diff --quiet HEAD` 只检测已跟踪改动。"""
+    return subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=REPO_DIR).returncode != 0
+
+
+def handle_dirty_worktree() -> str:
+    """让用户选择如何处理未提交改动；返回 'committed' / 'stashed'，取消则退出。"""
+    status = subprocess.run(
+        ["git", "status", "--short"], cwd=REPO_DIR, capture_output=True, text=True,
+    ).stdout.rstrip()
+    print("\n  ⚠️  检测到未提交改动，git pull --rebase 无法进行：")
+    for line in status.splitlines():
+        print(f"     {line}")
+    print("\n  要怎么处理？")
+    print("     [1] commit  — 提交这些改动（进入历史，随本次 sync 一起 push）")
+    print("     [2] stash   — 先暂存，sync 跑完自动恢复（改动仍保持未提交）")
+    print("     [其他] 取消")
+    choice = input("  请选择 [1/2]: ").strip()
+
+    if choice == "1":
+        default_msg = f"chore: 本地改动（sync 前提交 {datetime.now().strftime('%Y-%m-%d %H:%M')}）"
+        msg = input("  提交信息（直接回车用默认）: ").strip() or default_msg
+        subprocess.run(["git", "add", "-u"], cwd=REPO_DIR)
+        r = subprocess.run(["git", "commit", "-m", msg], cwd=REPO_DIR, capture_output=True)
+        if r.returncode != 0:
+            print("  commit 失败：")
+            print("  " + r.stderr.decode("utf-8", errors="ignore").strip())
+            sys.exit(1)
+        print("  已提交，稍后随 sync 一起推送。")
+        return "committed"
+
+    if choice == "2":
+        r = subprocess.run(
+            ["git", "stash", "push", "-m", "sync.py auto-stash"],
+            cwd=REPO_DIR, capture_output=True,
+        )
+        if r.returncode != 0:
+            print("  stash 失败：")
+            print("  " + r.stderr.decode("utf-8", errors="ignore").strip())
+            sys.exit(1)
+        print("  已暂存，sync 结束后会自动 git stash pop 恢复。")
+        return "stashed"
+
+    print("  已取消。")
+    sys.exit(0)
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 def main():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 开始同步...")
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    # 1. 先 pull（此时还没写任何文件，不会有 unstaged changes）
+    # 0. 工作区若有未提交改动，先让用户选 commit 还是 stash（否则 pull --rebase 会中止）
+    stashed = False
+    if has_uncommitted_changes():
+        stashed = handle_dirty_worktree() == "stashed"
+
+    try:
+        _do_sync()
+    finally:
+        if stashed:
+            print("  恢复暂存改动 (git stash pop)...")
+            r = subprocess.run(["git", "stash", "pop"], cwd=REPO_DIR, capture_output=True)
+            if r.returncode != 0:
+                print("  ⚠️  stash pop 失败或有冲突，请手动 `git stash list` 检查：")
+                print("  " + r.stderr.decode("utf-8", errors="ignore").strip())
+            else:
+                print("  暂存改动已恢复。")
+
+
+def _do_sync():
+    # 1. 先 pull（此时工作区已干净，不会有 unstaged changes 阻塞 rebase）
     print("  拉取远程最新...")
     pull = subprocess.run(["git", "pull", "--rebase"], cwd=REPO_DIR, capture_output=True)
     if pull.returncode != 0:
