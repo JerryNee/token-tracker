@@ -250,17 +250,25 @@ def parse_claude_sessions() -> list:
 def git_commit_push(new_count: int, updated_count: int):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     msg = f"sync: +{new_count} new, ~{updated_count} updated ({now})"
-    cmds = [
-        ["git", "add", "data/usage.ndjson"],
-        ["git", "commit", "-m", msg],
-        ["git", "push"],
-    ]
-    for cmd in cmds:
+
+    add = subprocess.run(["git", "add", "data/usage.ndjson"], cwd=REPO_DIR, capture_output=True)
+    if add.returncode != 0:
+        print("  命令失败: git add data/usage.ndjson")
+        print("  " + add.stderr.decode("utf-8", errors="ignore").strip())
+        return False
+
+    # 数据无变化时没有任何暂存内容，git commit 会以非零退出（nothing to commit）——这不是错误。
+    if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=REPO_DIR).returncode == 0:
+        print("  数据无变化，无需提交。")
+        # 仍尝试 push，把历史上未推送的提交同步到远程（已最新则为空操作）。
+        subprocess.run(["git", "push"], cwd=REPO_DIR, capture_output=True)
+        return True
+
+    for cmd in (["git", "commit", "-m", msg], ["git", "push"]):
         result = subprocess.run(cmd, cwd=REPO_DIR, capture_output=True)
         if result.returncode != 0:
             print(f"  命令失败: {' '.join(cmd)}")
-            stderr = result.stderr.decode("utf-8", errors="ignore").strip()
-            print(f"  {stderr}")
+            print("  " + result.stderr.decode("utf-8", errors="ignore").strip())
             return False
     return True
 
