@@ -9,8 +9,12 @@ import subprocess
 import sys
 import socket
 import platform
+import os
 from pathlib import Path
 from datetime import datetime
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
 
 def _canonical_device() -> str:
     """Hostname 在不同网络下会变 (Mac.mshome.net, wirelessprv-…illinois.edu, …)，
@@ -122,7 +126,9 @@ def parse_antigravity_sessions() -> list:
 
     print("  运行 TokenTracker sync...")
     try:
-        subprocess.run("npx tokentracker-cli sync --auto", shell=True, capture_output=True, timeout=30)
+        # Windows 下 shell=True 配合 timeout 且 capture_output=True 容易导致子进程卡死管道
+        # 所以将输出重定向到 DEVNULL 而不是捕捉输出
+        subprocess.run("npx tokentracker-cli sync --auto", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
     except Exception as e:
         print(f"  TokenTracker sync 失败: {e}")
 
@@ -251,6 +257,10 @@ def git_commit_push(new_count: int, updated_count: int):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     msg = f"sync: +{new_count} new, ~{updated_count} updated ({now})"
 
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
+
     add = subprocess.run(["git", "add", "data/usage.ndjson"], cwd=REPO_DIR, capture_output=True)
     if add.returncode != 0:
         print("  命令失败: git add data/usage.ndjson")
@@ -261,11 +271,11 @@ def git_commit_push(new_count: int, updated_count: int):
     if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=REPO_DIR).returncode == 0:
         print("  数据无变化，无需提交。")
         # 仍尝试 push，把历史上未推送的提交同步到远程（已最新则为空操作）。
-        subprocess.run(["git", "push"], cwd=REPO_DIR, capture_output=True)
+        subprocess.run(["git", "push"], cwd=REPO_DIR, capture_output=True, env=env)
         return True
 
     for cmd in (["git", "commit", "-m", msg], ["git", "push"]):
-        result = subprocess.run(cmd, cwd=REPO_DIR, capture_output=True)
+        result = subprocess.run(cmd, cwd=REPO_DIR, capture_output=True, env=env)
         if result.returncode != 0:
             print(f"  命令失败: {' '.join(cmd)}")
             print("  " + result.stderr.decode("utf-8", errors="ignore").strip())
@@ -348,7 +358,10 @@ def main():
 def _do_sync():
     # 1. 先 pull（此时工作区已干净，不会有 unstaged changes 阻塞 rebase）
     print("  拉取远程最新...")
-    pull = subprocess.run(["git", "pull", "--rebase"], cwd=REPO_DIR, capture_output=True)
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
+    pull = subprocess.run(["git", "pull", "--rebase"], cwd=REPO_DIR, capture_output=True, env=env)
     if pull.returncode != 0:
         stderr = pull.stderr.decode("utf-8", errors="ignore").strip()
         print(f"  pull 失败: {stderr}")
