@@ -126,9 +126,17 @@ def parse_antigravity_sessions() -> list:
 
     print("  运行 TokenTracker sync...")
     try:
-        # Windows 下 shell=True 配合 timeout 且 capture_output=True 容易导致子进程卡死管道
-        # 所以将输出重定向到 DEVNULL 而不是捕捉输出
-        subprocess.run("npx tokentracker-cli sync --auto", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        if platform.system() == "Windows":
+            # Windows 下 shell=True 会派生 cmd.exe，Python 的 timeout 只能杀死 cmd 而残留 node 子进程
+            # 使用 taskkill /T 可以强制结束整个进程树，避免挂起和文件锁占用
+            p = subprocess.Popen("npx tokentracker-cli sync --auto", shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                p.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print("  TokenTracker sync 超时，已强制终止进程树。")
+        else:
+            subprocess.run(["npx", "-y", "tokentracker-cli", "sync", "--auto"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
     except Exception as e:
         print(f"  TokenTracker sync 失败: {e}")
 
