@@ -49,6 +49,13 @@ PRICING = {
     # Claude Haiku 4
     "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00, "cache_write": 1.00, "cache_read": 0.08},
     "claude-haiku-4-5": {"input": 0.80, "output": 4.00, "cache_write": 1.00, "cache_read": 0.08},
+    # OpenAI models
+    "gpt-4o":                    {"input": 2.50, "output": 10.00, "cache_write": 0.00, "cache_read": 1.25},
+    "gpt-4o-mini":               {"input": 0.15, "output": 0.60,  "cache_write": 0.00, "cache_read": 0.075},
+    "gpt-4.1":                   {"input": 2.00, "output": 8.00,  "cache_write": 0.00, "cache_read": 0.50},
+    "gpt-4.1-mini":              {"input": 0.40, "output": 1.60,  "cache_write": 0.00, "cache_read": 0.10},
+    "o3":                        {"input": 10.00, "output": 40.00, "cache_write": 0.00, "cache_read": 2.50},
+    "o4-mini":                   {"input": 1.10, "output": 4.40,  "cache_write": 0.00, "cache_read": 0.275},
     # Gemini models
     "gemini-3.5-flash": {"input": 1.50, "output": 9.00,  "cache_write": 0.375,   "cache_read": 0.15},
     "gemini-3.1-pro":   {"input": 1.25, "output": 5.00,  "cache_write": 0.3125,  "cache_read": 0.125},
@@ -133,6 +140,8 @@ class AggRow:
 
 # ── Claude Code parser ────────────────────────────────────────────────────────
 CLAUDE_DIR = Path.home() / ".claude" / "projects"
+CODEX_DIR = Path.home() / ".codex" / "sessions"
+CODEX_CONFIG = Path.home() / ".codex" / "config.toml"
 
 def project_slug_to_name(slug: str) -> str:
     """Convert -Users-foo-bar-project to ~/bar/project."""
@@ -143,6 +152,52 @@ def project_slug_to_name(slug: str) -> str:
     # Keep only last 2 components for readability
     parts = path.split("/")
     return "/".join(parts[-2:]) if len(parts) > 2 else path
+
+def path_to_project_name(path_str: str) -> str:
+    if not path_str:
+        return "Codex Workspace"
+    path = path_str
+    home = str(Path.home())
+    if path.startswith(home):
+        path = "~" + path[len(home):]
+    parts = [p for p in path.split("/") if p]
+    return "/".join(parts[-2:]) if len(parts) > 2 else path
+
+def _int_token(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+def _codex_default_model() -> str:
+    if not CODEX_CONFIG.exists():
+        return "codex-openai"
+    try:
+        with open(CODEX_CONFIG, encoding="utf-8") as f:
+            for line in f:
+                m = _re.match(r'^\s*model\s*=\s*["\']([^"\']+)["\']', line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return "codex-openai"
+
+def _codex_usage_parts(usage: dict) -> Optional[tuple[int, int, int, int]]:
+    input_total = _int_token(usage.get("input_tokens"))
+    cached = _int_token(usage.get("cached_input_tokens"))
+    output = _int_token(usage.get("output_tokens"))
+    total = _int_token(usage.get("total_tokens"))
+
+    if input_total or cached or output:
+        uncached_input = max(input_total - cached, 0)
+        return uncached_input, cached, 0, output
+
+    # Older/imported Codex records can expose only total_tokens. Preserve the
+    # total in the schema even though the input/output split is unavailable.
+    if total:
+        return total, 0, 0, 0
+
+    return None
 
 TT_QUEUE   = Path.home() / ".tokentracker" / "tracker" / "queue.jsonl"
 
@@ -275,6 +330,87 @@ def parse_claude_sessions(since: Optional[datetime] = None) -> list[UsageRecord]
                         records.append(rec)
             except (OSError, PermissionError):
                 continue
+
+    return records
+
+
+def parse_codex_sessions(since: Optional[datetime] = None) -> list[UsageRecord]:
+    records: list[UsageRecord] = []
+    if not CODEX_DIR.exists():
+        return records
+
+    fallback_model = _codex_default_model()
+    seen_events: set[tuple[str, str, int, int]] = set()
+
+    for jsonl_file in CODEX_DIR.rglob("*.jsonl"):
+        session_id = jsonl_file.stem
+        project_name = "Codex Workspace"
+        model = fallback_model
+
+        try:
+            with open(jsonl_file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if entry.get("type") == "session_meta":
+                        payload = entry.get("payload", {})
+                        session_id = payload.get("id") or session_id
+                        project_name = path_to_project_name(payload.get("cwd", ""))
+                        model = payload.get("model") or fallback_model
+                        continue
+
+                    payload = entry.get("payload", {})
+                    if entry.get("type") != "event_msg" or payload.get("type") != "token_count":
+                        continue
+
+                    info = payload.get("info", {})
+                    usage = info.get("last_token_usage") or {}
+                    parts = _codex_usage_parts(usage)
+                    if not parts:
+                        continue
+
+                    ts_str = entry.get("timestamp")
+                    if ts_str:
+                        try:
+                            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                        except ValueError:
+                            ts = datetime.now(timezone.utc)
+                    else:
+                        ts = datetime.now(timezone.utc)
+
+                    if since and ts < since:
+                        continue
+
+                    event_key = (
+                        session_id,
+                        ts.isoformat(),
+                        _int_token(usage.get("total_tokens")),
+                        _int_token((info.get("total_token_usage") or {}).get("total_tokens")),
+                    )
+                    if event_key in seen_events:
+                        continue
+                    seen_events.add(event_key)
+
+                    input_tokens, cache_read_tokens, cache_write_tokens, output_tokens = parts
+                    records.append(UsageRecord(
+                        timestamp=ts,
+                        project=project_name,
+                        session_id=session_id,
+                        model=model,
+                        device=DEVICE,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        cache_write_tokens=cache_write_tokens,
+                        cache_read_tokens=cache_read_tokens,
+                    ))
+        except (OSError, PermissionError):
+            continue
 
     return records
 
@@ -434,9 +570,10 @@ Examples:
         window_label = f"last {args.days} days"
 
     print(f"\n  AI Token Tracker — {window_label}")
-    print(f"  Source: Claude Code ({CLAUDE_DIR}) & Antigravity ({TT_QUEUE if TT_QUEUE.exists() else 'not found'})")
+    print(f"  Source: Claude Code ({CLAUDE_DIR}), Codex ({CODEX_DIR}), Antigravity ({TT_QUEUE if TT_QUEUE.exists() else 'not found'})")
 
     records = parse_claude_sessions(since=since)
+    records.extend(parse_codex_sessions(since=since))
     antigravity_records = parse_antigravity_sessions(since=since)
     records.extend(antigravity_records)
 

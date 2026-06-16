@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-同步 Claude Code token 使用数据到 data/usage.ndjson，并推送到 GitHub。
-直接读取 ~/.claude/projects/ 原始会话文件，按小时聚合后备份。
+同步 Claude Code / Codex / Antigravity token 使用数据到 data/usage.ndjson，并推送到 GitHub。
+直接读取本地会话文件，按小时聚合后备份。
 """
 
 import json
@@ -11,7 +11,8 @@ import socket
 import platform
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
+import re as _re
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -51,6 +52,13 @@ PRICING = {
     "claude-sonnet-4-5": {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
     # Claude Haiku 4
     "claude-haiku-4-5":  {"input":  0.80, "output":  4.00, "cache_write":  1.00, "cache_read": 0.08},
+    # OpenAI models
+    "gpt-4o":           {"input":  2.50, "output": 10.00, "cache_write": 0.00, "cache_read": 1.25},
+    "gpt-4o-mini":      {"input":  0.15, "output":  0.60, "cache_write": 0.00, "cache_read": 0.075},
+    "gpt-4.1":          {"input":  2.00, "output":  8.00, "cache_write": 0.00, "cache_read": 0.50},
+    "gpt-4.1-mini":     {"input":  0.40, "output":  1.60, "cache_write": 0.00, "cache_read": 0.10},
+    "o3":               {"input": 10.00, "output": 40.00, "cache_write": 0.00, "cache_read": 2.50},
+    "o4-mini":          {"input":  1.10, "output":  4.40, "cache_write": 0.00, "cache_read": 0.275},
     # Gemini models
     "gemini-3.5-flash": {"input": 1.50, "output": 9.00,  "cache_write": 0.375,   "cache_read": 0.15},
     "gemini-3.1-pro":   {"input": 1.25, "output": 5.00,  "cache_write": 0.3125,  "cache_read": 0.125},
@@ -65,8 +73,7 @@ def _normalize_model(model: str) -> str:
     at the end of the string (version suffix), e.g. claude-opus-4.6 → claude-opus-4-6.
     Leaves family-name dots like gemini-3.5-flash untouched.
     """
-    import re
-    return re.sub(r'(?<=\d)\.(?=\d+$)', '-', model)
+    return _re.sub(r'(?<=\d)\.(?=\d+$)', '-', model)
 
 
 def calc_cost(rec: dict) -> float:
@@ -91,6 +98,8 @@ def total_cost(records: dict) -> float:
 REPO_DIR   = Path(__file__).parent
 DATA_FILE  = REPO_DIR / "data" / "usage.ndjson"
 CLAUDE_DIR = Path.home() / ".claude" / "projects"
+CODEX_DIR  = Path.home() / ".codex" / "sessions"
+CODEX_CONFIG = Path.home() / ".codex" / "config.toml"
 TT_QUEUE   = Path.home() / ".tokentracker" / "tracker" / "queue.jsonl"
 
 
@@ -260,6 +269,135 @@ def parse_claude_sessions() -> list:
     return list(buckets.values())
 
 
+# ── 解析 Codex 会话文件 ───────────────────────────────────────────────────────
+def _int_token(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _codex_default_model() -> str:
+    if not CODEX_CONFIG.exists():
+        return "codex-openai"
+    try:
+        with open(CODEX_CONFIG, encoding="utf-8") as f:
+            for line in f:
+                m = _re.match(r'^\s*model\s*=\s*["\']([^"\']+)["\']', line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return "codex-openai"
+
+
+def _codex_usage_parts(usage: dict):
+    input_total = _int_token(usage.get("input_tokens"))
+    cached = _int_token(usage.get("cached_input_tokens"))
+    output = _int_token(usage.get("output_tokens"))
+    total = _int_token(usage.get("total_tokens"))
+
+    if input_total or cached or output:
+        # OpenAI reports cached_input_tokens as a subset of input_tokens.
+        # Store only the uncached part in input_tokens to keep totals exact.
+        uncached_input = max(input_total - cached, 0)
+        return uncached_input, cached, 0, output
+
+    # Older/imported Codex records can expose only total_tokens. Preserve that
+    # usage in the schema even though input/output split is unavailable.
+    if total:
+        return total, 0, 0, 0
+
+    return None
+
+
+def parse_codex_sessions() -> list:
+    if not CODEX_DIR.exists():
+        print(f"  找不到 Codex 数据目录: {CODEX_DIR}")
+        return []
+
+    buckets: dict = {}
+    fallback_model = _codex_default_model()
+    seen_events: set[tuple[str, str, int, int]] = set()
+
+    for jsonl_file in CODEX_DIR.rglob("*.jsonl"):
+        session_id = jsonl_file.stem
+        model = fallback_model
+        try:
+            with open(jsonl_file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if entry.get("type") == "session_meta":
+                        payload = entry.get("payload", {})
+                        session_id = payload.get("id") or session_id
+                        model = payload.get("model") or fallback_model
+                        continue
+
+                    payload = entry.get("payload", {})
+                    if entry.get("type") != "event_msg" or payload.get("type") != "token_count":
+                        continue
+
+                    info = payload.get("info", {})
+                    usage = info.get("last_token_usage") or {}
+                    parts = _codex_usage_parts(usage)
+                    if not parts:
+                        continue
+
+                    ts_str = entry.get("timestamp", "")
+                    try:
+                        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(timezone.utc)
+                        hour_start = ts.replace(minute=0, second=0, microsecond=0).strftime(
+                            "%Y-%m-%dT%H:00:00.000Z"
+                        )
+                    except (ValueError, AttributeError):
+                        continue
+
+                    event_key = (
+                        session_id,
+                        ts.isoformat(),
+                        _int_token(usage.get("total_tokens")),
+                        _int_token((info.get("total_token_usage") or {}).get("total_tokens")),
+                    )
+                    if event_key in seen_events:
+                        continue
+                    seen_events.add(event_key)
+
+                    input_tokens, cached_input_tokens, cache_creation_input_tokens, output_tokens = parts
+                    key = (model, hour_start)
+                    b = buckets.setdefault(key, {
+                        "source":                      "codex",
+                        "model":                       model,
+                        "hour_start":                  hour_start,
+                        "device":                      DEVICE,
+                        "input_tokens":                0,
+                        "cached_input_tokens":         0,
+                        "cache_creation_input_tokens": 0,
+                        "output_tokens":               0,
+                        "total_tokens":                0,
+                        "conversations":               0,
+                    })
+                    b["input_tokens"]                += input_tokens
+                    b["cached_input_tokens"]         += cached_input_tokens
+                    b["cache_creation_input_tokens"] += cache_creation_input_tokens
+                    b["output_tokens"]               += output_tokens
+                    b["conversations"]               += 1
+                    b["total_tokens"] = (
+                        b["input_tokens"] + b["cached_input_tokens"]
+                        + b["cache_creation_input_tokens"] + b["output_tokens"]
+                    )
+        except (OSError, PermissionError):
+            continue
+
+    return list(buckets.values())
+
+
 # ── git commit + push（不含 pull）────────────────────────────────────────────
 def git_commit_push(new_count: int, updated_count: int):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -384,6 +522,11 @@ def _do_sync():
     print("  扫描 Claude Code 会话...")
     new_records = parse_claude_sessions()
     print(f"  解析到 {len(new_records)} 条 Claude Code 小时记录")
+
+    print("  扫描 Codex 会话...")
+    codex_records = parse_codex_sessions()
+    print(f"  解析到 {len(codex_records)} 条 Codex 小时记录")
+    new_records.extend(codex_records)
 
     print("  扫描 Antigravity 会话...")
     antigravity_records = parse_antigravity_sessions()

@@ -45,7 +45,7 @@ SOURCE_NAMES = {
     "copilot":      "GitHub Copilot",
     "gemini":       "Gemini CLI",
     "antigravity":  "Antigravity CLI",
-    "codex":        "Codex CLI",
+    "codex":        "Codex",
     "every-code":   "Every Code",
     "opencode":     "OpenCode",
     "kiro":         "Kiro",
@@ -269,7 +269,7 @@ def generate_readme(records: list) -> str:
 {make_table(["设备"] + headers, device_table)}
 
 > 费用为估算值，基于 [Anthropic](https://www.anthropic.com/pricing) / [OpenAI](https://openai.com/api/pricing/) / [Google Gemini](https://ai.google.dev/pricing) 官方定价。
-> 数据来源：`~/.claude/projects/` 会话文件及 `~/.tokentracker/tracker/`，由 sync.py 自动备份。
+> 数据来源：`~/.claude/projects/`、`~/.codex/sessions/` 会话文件及 `~/.tokentracker/tracker/`，由 sync.py 自动备份。
 """
 
 
