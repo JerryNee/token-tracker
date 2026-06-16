@@ -22,7 +22,10 @@ PRICING = {
     "claude-sonnet-4-5":         {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
     "claude-haiku-4-5-20251001": {"input":  0.80, "output":  4.00, "cache_write":  1.00, "cache_read": 0.08},
     "claude-haiku-4-5":          {"input":  0.80, "output":  4.00, "cache_write":  1.00, "cache_read": 0.08},
-    # Cursor / GPT 系列（粗略估算）
+    # OpenAI / GPT 系列（API 标准价估算）
+    "gpt-5.5":                    {"input":  5.00, "output": 30.00, "cache_write":  0.00, "cache_read": 0.50},
+    "gpt-5.4":                    {"input":  2.50, "output": 15.00, "cache_write":  0.00, "cache_read": 0.25},
+    "gpt-5.4-mini":               {"input":  0.75, "output":  4.50, "cache_write":  0.00, "cache_read": 0.075},
     "gpt-4o":                    {"input":  2.50, "output": 10.00, "cache_write":  0.00, "cache_read": 1.25},
     "gpt-4o-mini":               {"input":  0.15, "output":  0.60, "cache_write":  0.00, "cache_read": 0.075},
     "gpt-4.1":                   {"input":  2.00, "output":  8.00, "cache_write":  0.00, "cache_read": 0.50},
@@ -58,8 +61,10 @@ import re as _re
 
 def _normalize_model(model: str) -> str:
     """Normalize trailing version dots to dashes: claude-opus-4.6 → claude-opus-4-6.
-    Leaves family-name dots like gemini-3.5-flash untouched.
+    Leaves OpenAI/Gemini dots like gpt-5.5 and gemini-3.5-flash untouched.
     """
+    if not model.startswith("claude-"):
+        return model
     return _re.sub(r'(?<=\d)\.(?=\d+$)', '-', model)
 
 
