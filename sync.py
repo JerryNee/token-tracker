@@ -349,7 +349,10 @@ def parse_codex_sessions() -> list:
                     if entry.get("type") != "event_msg" or payload.get("type") != "token_count":
                         continue
 
-                    info = payload.get("info", {})
+                    # Codex 有时会写 "info": null（只带 rate_limits 的事件）。
+                    # payload.get("info", {}) 的默认值仅在键缺失时生效，值为 null 仍会拿到 None，
+                    # 故用 `or {}` 兜底，避免下一行 None.get(...) 崩溃。
+                    info = payload.get("info") or {}
                     usage = info.get("last_token_usage") or {}
                     parts = _codex_usage_parts(usage)
                     if not parts:
