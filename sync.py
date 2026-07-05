@@ -42,6 +42,8 @@ def _canonical_device() -> str:
 DEVICE = _canonical_device()
 
 PRICING = {
+    # Claude Fable 5
+    "claude-fable-5":   {"input": 10.00, "output": 50.00, "cache_write": 12.50, "cache_read": 1.00},
     # Claude Opus 4
     "claude-opus-4-8":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
     "claude-opus-4-7":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},

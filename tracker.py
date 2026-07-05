@@ -38,6 +38,8 @@ DEVICE = _canonical_device()
 
 # ── Pricing (USD per 1M tokens) ──────────────────────────────────────────────
 PRICING = {
+    # Claude Fable 5
+    "claude-fable-5":   {"input": 10.00, "output": 50.00, "cache_write": 12.50, "cache_read": 1.00},
     # Claude Opus 4
     "claude-opus-4-8":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
     "claude-opus-4-7":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
@@ -374,7 +376,9 @@ def parse_codex_sessions(since: Optional[datetime] = None) -> list[UsageRecord]:
                     if entry.get("type") != "event_msg" or payload.get("type") != "token_count":
                         continue
 
-                    info = payload.get("info", {})
+                    # Codex 有时会写 "info": null（只带 rate_limits 的事件）。
+                    # payload.get("info", {}) 的默认值仅在键缺失时生效，值为 null 仍会拿到 None。
+                    info = payload.get("info") or {}
                     usage = info.get("last_token_usage") or {}
                     parts = _codex_usage_parts(usage)
                     if not parts:
