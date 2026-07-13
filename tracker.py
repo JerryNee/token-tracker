@@ -48,6 +48,12 @@ PRICING = {
     # Claude Sonnet 4
     "claude-sonnet-4-6": {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
     "claude-sonnet-4-5": {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
+    # Claude Sonnet 5 — 引导价 $2/$10（至 2026-08-31），2026-09-01 起标准价 $3/$15。
+    # 同一 model ID 分段计价示例：值为按 from 升序的档位列表，见 _price_row()。
+    "claude-sonnet-5": [
+        {"from": "2026-01-01", "input": 2.00, "output": 10.00, "cache_write": 2.50, "cache_read": 0.20},
+        {"from": "2026-09-01", "input": 3.00, "output": 15.00, "cache_write": 3.75, "cache_read": 0.30},
+    ],
     # Claude Haiku 4
     "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00, "cache_write": 1.25, "cache_read": 0.10},
     "claude-haiku-4-5": {"input": 1.00, "output": 5.00, "cache_write": 1.25, "cache_read": 0.10},
@@ -85,17 +91,45 @@ def _normalize_model(model: str) -> str:
     return _re.sub(r'(?<=\d)\.(?=\d+$)', '-', model)
 
 
-def get_price(model: str, kind: str) -> float:
-    """Return price per 1M tokens for a model+kind, falling back to family match."""
+def _price_row(model: str, when=None) -> dict:
+    """Resolve the price dict for `model` effective at `when`.
+
+    PRICING[model] is either a flat dict (one price for all time) or a list of
+    effective-dated tiers [{"from": "YYYY-MM-DD", ...}, ...]. For a list we pick
+    the tier whose `from` is the latest date <= `when`. `when` accepts a datetime,
+    an ISO string (e.g. hour_start), or None (→ latest/current price).
+    """
     model = _normalize_model(model)
-    if model in PRICING:
-        return PRICING[model].get(kind, 0.0)
-    # Fuzzy family match
-    for key, prices in PRICING.items():
-        if model.startswith(key) or key.startswith(model.split("-20")[0]):
-            return prices.get(kind, 0.0)
-    # Unknown model — return 0 rather than crash
-    return 0.0
+    entry = PRICING.get(model)
+    if entry is None:
+        for key, val in PRICING.items():
+            if model.startswith(key) or key.startswith(model.split("-20")[0]):
+                entry = val
+                break
+    if entry is None:
+        return {}
+    if isinstance(entry, dict):
+        return entry
+    # effective-dated tiers
+    if when is None:
+        day = "9999-12-31"
+    elif isinstance(when, str):
+        day = when[:10]
+    else:  # datetime / date
+        day = when.strftime("%Y-%m-%d")
+    tiers = sorted(entry, key=lambda t: t.get("from", ""))
+    chosen = tiers[0]
+    for t in tiers:
+        if t.get("from", "") <= day:
+            chosen = t
+        else:
+            break
+    return chosen
+
+
+def get_price(model: str, kind: str, when=None) -> float:
+    """Return price per 1M tokens for a model+kind at `when`, falling back to family match."""
+    return _price_row(model, when).get(kind, 0.0)
 
 
 # ── Data structures ───────────────────────────────────────────────────────────
@@ -115,10 +149,10 @@ class UsageRecord:
     def cost(self) -> float:
         m = 1_000_000
         return (
-            self.input_tokens      * get_price(self.model, "input")       / m +
-            self.output_tokens     * get_price(self.model, "output")      / m +
-            self.cache_write_tokens * get_price(self.model, "cache_write") / m +
-            self.cache_read_tokens  * get_price(self.model, "cache_read")  / m
+            self.input_tokens      * get_price(self.model, "input",       self.timestamp) / m +
+            self.output_tokens     * get_price(self.model, "output",      self.timestamp) / m +
+            self.cache_write_tokens * get_price(self.model, "cache_write", self.timestamp) / m +
+            self.cache_read_tokens  * get_price(self.model, "cache_read",  self.timestamp) / m
         )
 
     @property

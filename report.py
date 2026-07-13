@@ -21,6 +21,12 @@ PRICING = {
     "claude-opus-4-5":           {"input":  5.00, "output": 25.00, "cache_write":  6.25, "cache_read": 0.50},
     "claude-sonnet-4-6":         {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
     "claude-sonnet-4-5":         {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
+    # Claude Sonnet 5 — 引导价 $2/$10（至 2026-08-31），2026-09-01 起标准价 $3/$15。
+    # 同一 model ID 分段计价：值为按 from 升序的档位列表，见 _price_row()。
+    "claude-sonnet-5": [
+        {"from": "2026-01-01", "input":  2.00, "output": 10.00, "cache_write":  2.50, "cache_read": 0.20},
+        {"from": "2026-09-01", "input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
+    ],
     "claude-haiku-4-5-20251001": {"input":  1.00, "output":  5.00, "cache_write":  1.25, "cache_read": 0.10},
     "claude-haiku-4-5":          {"input":  1.00, "output":  5.00, "cache_write":  1.25, "cache_read": 0.10},
     # OpenAI / GPT 系列（API 标准价估算）
@@ -72,24 +78,54 @@ def _normalize_model(model: str) -> str:
     return _re.sub(r'(?<=\d)\.(?=\d+$)', '-', model)
 
 
-def get_price(model: str, kind: str) -> float:
+def _price_row(model: str, when=None) -> dict:
+    """Resolve the price dict for `model` effective at `when`.
+
+    PRICING[model] is either a flat dict (one price for all time) or a list of
+    effective-dated tiers [{"from": "YYYY-MM-DD", ...}, ...]. For a list we pick
+    the tier whose `from` is the latest date <= `when`. `when` accepts an ISO
+    string (e.g. hour_start), a datetime, or None (→ latest/current price).
+    """
     model = _normalize_model(model)
-    if model in PRICING:
-        return PRICING[model].get(kind, 0.0)
-    for key, prices in PRICING.items():
-        if model.startswith(key) or key.startswith(model.split("-20")[0]):
-            return prices.get(kind, 0.0)
-    return 0.0
+    entry = PRICING.get(model)
+    if entry is None:
+        for key, val in PRICING.items():
+            if model.startswith(key) or key.startswith(model.split("-20")[0]):
+                entry = val
+                break
+    if entry is None:
+        return {}
+    if isinstance(entry, dict):
+        return entry
+    if when is None:
+        day = "9999-12-31"
+    elif isinstance(when, str):
+        day = when[:10]
+    else:
+        day = when.strftime("%Y-%m-%d")
+    tiers = sorted(entry, key=lambda t: t.get("from", ""))
+    chosen = tiers[0]
+    for t in tiers:
+        if t.get("from", "") <= day:
+            chosen = t
+        else:
+            break
+    return chosen
+
+
+def get_price(model: str, kind: str, when=None) -> float:
+    return _price_row(model, when).get(kind, 0.0)
 
 
 def calc_cost(rec: dict) -> float:
     m = 1_000_000
     model = rec["model"]
+    when = rec.get("hour_start")
     return (
-        rec.get("input_tokens", 0)                * get_price(model, "input")       / m +
-        rec.get("output_tokens", 0)               * get_price(model, "output")      / m +
-        rec.get("cache_creation_input_tokens", 0) * get_price(model, "cache_write") / m +
-        rec.get("cached_input_tokens", 0)         * get_price(model, "cache_read")  / m
+        rec.get("input_tokens", 0)                * get_price(model, "input",       when) / m +
+        rec.get("output_tokens", 0)               * get_price(model, "output",      when) / m +
+        rec.get("cache_creation_input_tokens", 0) * get_price(model, "cache_write", when) / m +
+        rec.get("cached_input_tokens", 0)         * get_price(model, "cache_read",  when) / m
     )
 
 
