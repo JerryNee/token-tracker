@@ -45,16 +45,19 @@ PRICING = {
     # Claude Fable 5
     "claude-fable-5":   {"input": 10.00, "output": 50.00, "cache_write": 12.50, "cache_read": 1.00},
     # Claude Opus 4
-    "claude-opus-4-8":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
-    "claude-opus-4-7":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
-    "claude-opus-4-6":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
-    "claude-opus-4-5":   {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
+    "claude-opus-4-8":   {"input":  5.00, "output": 25.00, "cache_write":  6.25, "cache_read": 0.50},
+    "claude-opus-4-7":   {"input":  5.00, "output": 25.00, "cache_write":  6.25, "cache_read": 0.50},
+    "claude-opus-4-6":   {"input":  5.00, "output": 25.00, "cache_write":  6.25, "cache_read": 0.50},
+    "claude-opus-4-5":   {"input":  5.00, "output": 25.00, "cache_write":  6.25, "cache_read": 0.50},
     # Claude Sonnet 4
     "claude-sonnet-4-6": {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
     "claude-sonnet-4-5": {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
     # Claude Haiku 4
-    "claude-haiku-4-5":  {"input":  0.80, "output":  4.00, "cache_write":  1.00, "cache_read": 0.08},
+    "claude-haiku-4-5":  {"input":  1.00, "output":  5.00, "cache_write":  1.25, "cache_read": 0.10},
     # OpenAI models
+    "gpt-5.6-sol":       {"input":  5.00, "output": 30.00, "cache_write": 6.25,  "cache_read": 0.50},
+    "gpt-5.6-terra":     {"input":  2.50, "output": 15.00, "cache_write": 3.125, "cache_read": 0.25},
+    "gpt-5.6-luna":      {"input":  1.00, "output":  6.00, "cache_write": 1.25,  "cache_read": 0.10},
     "gpt-5.5":           {"input":  5.00, "output": 30.00, "cache_write": 0.00, "cache_read": 0.50},
     "gpt-5.4":           {"input":  2.50, "output": 15.00, "cache_write": 0.00, "cache_read": 0.25},
     "gpt-5.4-mini":      {"input":  0.75, "output":  4.50, "cache_write": 0.00, "cache_read": 0.075},
@@ -66,8 +69,8 @@ PRICING = {
     "o4-mini":          {"input":  1.10, "output":  4.40, "cache_write": 0.00, "cache_read": 0.275},
     # Gemini models
     "gemini-3.5-flash": {"input": 1.50, "output": 9.00,  "cache_write": 0.375,   "cache_read": 0.15},
-    "gemini-3.1-pro":   {"input": 1.25, "output": 5.00,  "cache_write": 0.3125,  "cache_read": 0.125},
-    "gemini-2.5-pro":   {"input": 1.25, "output": 5.00,  "cache_write": 0.3125,  "cache_read": 0.125},
+    "gemini-3.1-pro":   {"input": 2.00, "output": 12.00, "cache_write": 0.50,    "cache_read": 0.20},
+    "gemini-2.5-pro":   {"input": 1.25, "output": 10.00, "cache_write": 0.3125,  "cache_read": 0.125},
     "gemini-2.5-flash": {"input": 0.30, "output": 2.50,  "cache_write": 0.075,   "cache_read": 0.03},
     "gemini-2.0-pro":   {"input": 1.25, "output": 5.00,  "cache_write": 0.3125,  "cache_read": 0.125},
     "gemini-2.0-flash": {"input": 0.075,"output": 0.30,  "cache_write": 0.01875, "cache_read": 0.01875},
