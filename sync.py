@@ -553,9 +553,24 @@ def _do_sync():
     # 4. 合并 + 检测同时段同 (source, model) 下出现新 device（hostname 漂移）
     cost_before = sum(calc_cost(r) for r in existing.values())
     existing_by_smh = {(k[0], k[1], k[2]): k[3] for k in existing.keys()}
+    # (source, device, hour_start) -> model，用于检测 codex 模型重标导致的重复计数
+    existing_by_sdh = {(k[0], r.get("device", "unknown"), k[2]): k[1]
+                       for k, r in existing.items()}
     new_count = updated_count = 0
     device_drift = []  # (source, model, hour_start, old_device, new_device)
+    model_relabel = []  # (source, hour_start, device, old_model, new_model)
     for rec in new_records:
+        # Codex 会话文件不记录 model，模型名取自 ~/.codex/config.toml 的当前默认值。
+        # 用户切换默认模型后，重新解析会把同一批旧会话按新模型重标（token 完全相同），
+        # 而合并键含 model → 旧记录留存、又多出新模型副本 → 历史小时翻倍。
+        # 若某 (source, device, hour) 已按别的模型记过，保留历史归属、丢弃重标副本。
+        if rec["source"] == "codex":
+            sdh = (rec["source"], rec.get("device", "unknown"), rec["hour_start"])
+            prev_model = existing_by_sdh.get(sdh)
+            if prev_model is not None and prev_model != rec["model"]:
+                model_relabel.append((rec["source"], rec["hour_start"],
+                                      rec.get("device", "unknown"), prev_model, rec["model"]))
+                continue
         key = (rec["source"], rec["model"], rec["hour_start"], rec.get("device", "unknown"))
         smh = (rec["source"], rec["model"], rec["hour_start"])
         if smh in existing_by_smh and existing_by_smh[smh] != key[3]:
@@ -567,6 +582,15 @@ def _do_sync():
         existing[key] = rec
 
     print(f"  合并后共 {len(existing)} 条（新增 {new_count}，更新 {updated_count}）")
+
+    # 提示：codex 历史小时被 config 新默认模型重标，已保留原归属避免重复计数
+    if model_relabel:
+        print(f"\n  ℹ️  codex 模型重标：{len(model_relabel)} 个历史小时按 config 新默认被重新归属，"
+              f"已保留原模型避免翻倍：")
+        for s, h, dev, old_m, new_m in model_relabel[:5]:
+            print(f"     {s}@{h} [{dev}]  保留 {old_m}（忽略 {new_m}）")
+        if len(model_relabel) > 5:
+            print(f"     ... 还有 {len(model_relabel) - 5} 条")
 
     # 异常检测：device 漂移 — 同 (source, model, hour) 下出现两个 device
     if device_drift:
