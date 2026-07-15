@@ -368,9 +368,15 @@ def parse_codex_sessions() -> list:
 
     buckets: dict = {}
     fallback_model = _codex_default_model()
-    seen_events: set[tuple[str, str, int, int]] = set()
+    # 去重键不含时间戳：Codex resume/fork 会话会把整段历史回放进一个新 rollout 文件，
+    # 每个 token_count 事件盖上 resume 时刻的新时间戳，但 last_token_usage / total_token_usage
+    # 序列与原会话逐条相同。旧实现把 ts 放进去重键 → 回放副本 ts 不同 → 同一批用量被 resume
+    # 次数倍计（实测虚增约 46%）。改用 (session_id, 累计 total, last total)：同一会话 cumulative
+    # 单调递增，(cum,last) 逐轮唯一；last=0 的空事件贡献 0，重复丢弃无害。文件按名（内嵌 ISO
+    # 时间）排序处理，令原始会话先于 resume 文件，事件归到最早出现的小时。
+    seen_events: set[tuple[str, int, int]] = set()
 
-    for jsonl_file in CODEX_DIR.rglob("*.jsonl"):
+    for jsonl_file in sorted(CODEX_DIR.rglob("*.jsonl")):
         session_id = jsonl_file.stem
         model = fallback_model
         try:
@@ -414,9 +420,8 @@ def parse_codex_sessions() -> list:
 
                     event_key = (
                         session_id,
-                        ts.isoformat(),
-                        _int_token(usage.get("total_tokens")),
                         _int_token((info.get("total_token_usage") or {}).get("total_tokens")),
+                        _int_token(usage.get("total_tokens")),
                     )
                     if event_key in seen_events:
                         continue
