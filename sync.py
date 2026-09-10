@@ -17,10 +17,18 @@ import re as _re
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
+# 这台 MacBook 的历史桶都记在这个固定名下；所有 MacBook 变体都归一到它。
+CANONICAL_MAC = "Jerrys-MacBook-Pro-403.local"
+
+
 def _canonical_device() -> str:
     """Hostname 在不同网络下会变 (Mac.mshome.net, wirelessprv-…illinois.edu, …)，
     导致同小时桶按 device 拆成两条 → 双重计数。
-    优先用 macOS 的 LocalHostName（与网络无关），兜底再用 hostname 关键词匹配。"""
+    优先用 macOS 的 LocalHostName（与网络无关），兜底再用 hostname 关键词匹配。
+
+    注意 LocalHostName 本身也会漂移：macOS 检测到网络重名时会追加/递增数字后缀
+    (Jerrys-MacBook-Pro-403 → -408)，直接用会让同一台机器的历史桶被当成新 device
+    重新计数。因此任何含 MacBook 的名字都收敛到 CANONICAL_MAC。"""
     if platform.system() == "Darwin":
         try:
             name = subprocess.check_output(
@@ -28,14 +36,14 @@ def _canonical_device() -> str:
                 stderr=subprocess.DEVNULL, timeout=2,
             ).decode().strip()
             if name:
-                return name + ".local"
+                return CANONICAL_MAC if "MacBook" in name else name + ".local"
         except (subprocess.SubprocessError, FileNotFoundError, OSError):
             pass
     h = socket.gethostname()
     if "MacBook" in h or h.startswith("Mac.") or h == "Mac":
-        return "Jerrys-MacBook-Pro-403.local"
+        return CANONICAL_MAC
     if platform.system() == "Darwin":
-        return "Jerrys-MacBook-Pro-403.local"
+        return CANONICAL_MAC
     return h
 
 
@@ -597,12 +605,26 @@ def _do_sync():
 
     # 4. 合并 + 检测同时段同 (source, model) 下出现新 device（hostname 漂移）
     cost_before = sum(calc_cost(r) for r in existing.values())
-    existing_by_smh = {(k[0], k[1], k[2]): k[3] for k in existing.keys()}
+    # 合并前快照：历史日均 + 最忙一天的花费 + 最新日期，供费用护栏按“时间”归一。
+    _prev_day_cost = {}
+    for r in existing.values():
+        _prev_day_cost[r["hour_start"][:10]] = _prev_day_cost.get(r["hour_start"][:10], 0.0) + calc_cost(r)
+    prev_latest_day = max(_prev_day_cost) if _prev_day_cost else ""
+    prev_daily_avg = cost_before / len(_prev_day_cost) if _prev_day_cost else 0.0
+    prev_peak_day = max(_prev_day_cost.values()) if _prev_day_cost else 0.0
+    def _toks(r):
+        return (r.get("input_tokens", 0), r.get("output_tokens", 0),
+                r.get("cache_creation_input_tokens", 0), r.get("cached_input_tokens", 0))
+    # (source, model, hour) -> [(device, token_sig), ...]（同一 smh 可能有多台机器）
+    existing_by_smh = {}
+    for k, r in existing.items():
+        existing_by_smh.setdefault((k[0], k[1], k[2]), []).append((k[3], _toks(r)))
     # (source, device, hour_start) -> model，用于检测 codex 模型重标导致的重复计数
     existing_by_sdh = {(k[0], r.get("device", "unknown"), k[2]): k[1]
                        for k, r in existing.items()}
     new_count = updated_count = 0
-    device_drift = []  # (source, model, hour_start, old_device, new_device)
+    device_drift = []      # 危险：同一份数据被换名重记（token 完全相同）→ 双重计数
+    multi_machine = []     # 良性：两台机器同小时各跑各的（token 不同）→ 分桶保留
     model_relabel = []  # (source, hour_start, device, old_model, new_model)
     for rec in new_records:
         # Codex 会话文件不记录 model，模型名取自 ~/.codex/config.toml 的当前默认值。
@@ -618,8 +640,16 @@ def _do_sync():
                 continue
         key = (rec["source"], rec["model"], rec["hour_start"], rec.get("device", "unknown"))
         smh = (rec["source"], rec["model"], rec["hour_start"])
-        if smh in existing_by_smh and existing_by_smh[smh] != key[3]:
-            device_drift.append((*smh, existing_by_smh[smh], key[3]))
+        # 同 smh 下若存在“别的 device”，区分两种情况：
+        #   token 完全相同 → 同一份数据被换名重记（hostname 漂移/共享会话），会双计数 → 危险
+        #   token 不同     → 两台机器同小时各自的真实用量，分桶保留 → 良性
+        for old_dev, old_sig in existing_by_smh.get(smh, ()):
+            if old_dev == key[3]:
+                continue
+            if old_sig == _toks(rec):
+                device_drift.append((*smh, old_dev, key[3]))
+            else:
+                multi_machine.append((*smh, old_dev, key[3]))
         if key in existing:
             updated_count += 1
         else:
@@ -637,7 +667,15 @@ def _do_sync():
         if len(model_relabel) > 5:
             print(f"     ... 还有 {len(model_relabel) - 5} 条")
 
-    # 异常检测：device 漂移 — 同 (source, model, hour) 下出现两个 device
+    # 提示：两台机器同小时各跑各的，token 不同 → 各自分桶保留，不是双计数
+    if multi_machine:
+        seen = {(o, n) for *_, o, n in multi_machine}
+        print(f"\n  ℹ️  多机同时段：{len(multi_machine)} 个小时在两台 device 上各有独立用量"
+              f"（token 不同，分桶保留）：")
+        for o, n in list(seen)[:5]:
+            print(f"     {o!r} 与 {n!r} 同小时并存")
+
+    # 异常检测：device 漂移 — 同 (source, model, hour) 下同一份数据被换名重记（token 相同）
     if device_drift:
         print(f"\n  ⚠️  device 漂移检测到 {len(device_drift)} 条同时段桶被分配到新 device：")
         for s, m, h, old_dev, new_dev in device_drift[:5]:
@@ -648,16 +686,29 @@ def _do_sync():
         print(f"  这会让历史桶被双计数。检查 _canonical_device() 是否识别当前 hostname。中止。")
         sys.exit(2)
 
-    # 异常检测：费用涨幅超过 20% 时警告
+    # 异常检测：费用护栏（按“新覆盖的天数”归一，而非看累计涨幅）。
+    # 旧版比的是累计涨幅 > 20%：断更越久基数相对越小，正常补录必然超阈值——惩罚的是
+    # 断更而非双计数。真正的结构性双计数已由上面 device 漂移 / codex 重标+回放护栏拦截；
+    # 这里只做粗兜底：净增额是否显著超过“这段天数按历史日均能解释的量 + 一个最忙日的余量”。
     cost_after = sum(calc_cost(r) for r in existing.values())
-    if cost_before > 0:
-        pct = (cost_after - cost_before) / cost_before * 100
-        if pct > 20:
-            print(f"\n  ⚠️  费用异常：${cost_before:.2f} → ${cost_after:.2f} (+{pct:.0f}%)")
-            print("  可能存在重复计数，请检查后再推送。继续？[y/N] ", end="", flush=True)
+    delta = cost_after - cost_before
+    now_days = {r["hour_start"][:10] for r in existing.values()}
+    covered = len([d for d in now_days if d > prev_latest_day]) or 1  # 上次最新日期之后的新日历天
+    expected = prev_daily_avg * covered
+    allowed = expected + prev_peak_day * 1.5   # 允许比线性预期多出约一个最忙日，容纳用量突发
+    if prev_daily_avg > 0 and delta > 5 and delta > allowed:
+        print(f"\n  ⚠️  费用异常：+${delta:.2f}（${cost_before:.2f} → ${cost_after:.2f}）")
+        print(f"     新覆盖 {covered} 天 × 历史日均 ${prev_daily_avg:.2f} ≈ 预期 +${expected:.2f}"
+              f"（含突发余量上限 ${allowed:.2f}），实际远超 → 可能重复计数。")
+        interactive = bool(getattr(sys.stdin, "isatty", lambda: False)())
+        if interactive:
+            print("  复核后继续推送？[y/N] ", end="", flush=True)
             if input().strip().lower() != "y":
                 print("  已取消。")
                 sys.exit(0)
+        else:
+            print("  非交互运行（如 launchd），已中止且未写入，请在终端手动跑 sync.py 复核。")
+            sys.exit(3)
 
     # 5. 写文件
     sorted_records = sorted(existing.values(), key=lambda r: (r["hour_start"], r["source"], r["model"], r.get("device", "unknown")))
