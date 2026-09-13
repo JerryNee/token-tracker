@@ -15,6 +15,7 @@ DATA_FILE = REPO_DIR / "data" / "usage.ndjson"
 # ── 定价（USD / 1M tokens）──────────────────────────────────────────────────
 PRICING = {
     "claude-fable-5":             {"input": 10.00, "output": 50.00, "cache_write": 12.50, "cache_read": 1.00},
+    "claude-opus-5":             {"input":  5.00, "output": 25.00, "cache_write":  6.25, "cache_read": 0.50},
     "claude-opus-4-8":           {"input":  5.00, "output": 25.00, "cache_write":  6.25, "cache_read": 0.50},
     "claude-opus-4-7":           {"input":  5.00, "output": 25.00, "cache_write":  6.25, "cache_read": 0.50},
     "claude-opus-4-6":           {"input":  5.00, "output": 25.00, "cache_write":  6.25, "cache_read": 0.50},
