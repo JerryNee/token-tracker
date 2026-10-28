@@ -38,9 +38,11 @@ DEVICE = _canonical_device()
 
 # ── Pricing (USD per 1M tokens) ──────────────────────────────────────────────
 PRICING = {
+    "claude-fable-5-1": {"input": 10.00, "output": 50.00, "cache_write": 12.50, "cache_read": 0.25},
     # Claude Fable 5
     "claude-fable-5":   {"input": 10.00, "output": 50.00, "cache_write": 12.50, "cache_read": 1.00},
     # Claude Opus 5
+    "claude-opus-5-5":   {"input":  4.00, "output": 20.00, "cache_write":  5.00, "cache_read": 0.20},
     "claude-opus-5":     {"input":  5.00, "output": 25.00, "cache_write":  6.25, "cache_read": 0.50},
     # Claude Opus 4
     "claude-opus-4-8":   {"input":  5.00, "output": 25.00, "cache_write":  6.25, "cache_read": 0.50},
@@ -60,6 +62,7 @@ PRICING = {
     "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00, "cache_write": 1.25, "cache_read": 0.10},
     "claude-haiku-4-5": {"input": 1.00, "output": 5.00, "cache_write": 1.25, "cache_read": 0.10},
     # OpenAI models
+    "gpt-6.1-sol":                {"input": 2.00, "output": 10.00, "cache_write": 2.50,  "cache_read": 0.10},
     "gpt-5.6-sol":                {"input": 5.00, "output": 30.00, "cache_write": 6.25,  "cache_read": 0.50},
     "gpt-5.6-terra":              {"input": 2.50, "output": 15.00, "cache_write": 3.125, "cache_read": 0.25},
     "gpt-5.6-luna":               {"input": 1.00, "output": 6.00,  "cache_write": 1.25,  "cache_read": 0.10},
